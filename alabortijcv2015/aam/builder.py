@@ -13,10 +13,10 @@ from menpofast.utils import build_parts_image, convert_from_menpo
 
 from menpofit.transform import (DifferentiablePiecewiseAffine,
                                 DifferentiableThinPlateSplines)
-from menpofit.aam.builder import (build_reference_frame,
-                                  build_patch_reference_frame)
 
 from alabortijcv2015.utils import fsmooth
+
+from .base import build_reference_frame, build_patch_reference_frame
 
 
 # Abstract Interface for AAM Builders -----------------------------------------
@@ -222,9 +222,8 @@ class GlobalAAMBuilder(AAMBuilder):
         self.boundary = boundary
 
     def _build_reference_frame(self, mean_shape):
-        return convert_from_menpo(
-            build_reference_frame(mean_shape, boundary=self.boundary,
-                                  trilist=self.trilist))
+        return build_reference_frame(mean_shape, boundary=self.boundary,
+                                     trilist=self.trilist)
 
     def _warp_images(self, images, shapes, ref_shape, level_str, verbose):
         # compute transforms
@@ -305,7 +304,7 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
 
     def __init__(self, features=None, transform=DifferentiablePiecewiseAffine,
                  trilist=None, diagonal=None, sigma=None, scales=(1, .5),
-                 scale_shapes=True, scale_features=True,
+                 scale_shapes=False, scale_features=True,
                  max_shape_components=None, max_appearance_components=None,
                  boundary=3):
 
@@ -326,9 +325,9 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
         shape_model = GlobalAAMBuilder._build_shape_model(
             shapes, max_components)
 
-        self.n_landmarks = shape_model.mean.n_points
+        self.n_landmarks = shape_model.mean().n_points
 
-        self.reference_frame = self._build_reference_frame(shape_model.mean)
+        self.reference_frame = self._build_reference_frame(shape_model.mean())
 
         # compute non-linear transforms
         transforms = (
@@ -338,7 +337,7 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
         # build dense shapes
         dense_shapes = []
         for (t, s) in zip(transforms, shapes):
-            warped_points = t.apply(self.reference_frame.mask.true_indices)
+            warped_points = t.apply(self.reference_frame.mask.true_indices())
             dense_shape = PointCloud(np.vstack((s.points, warped_points)))
             dense_shapes.append(dense_shape)
 
@@ -380,7 +379,7 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
 class LinearPatchAAMBuilder(PatchAAMBuilder):
 
     def __init__(self, patch_shape=(16, 16), features=None,
-                 diagonal=None, sigma=None, scales=(1, .5), scale_shapes=True,
+                 diagonal=None, sigma=None, scales=(1, .5), scale_shapes=False,
                  scale_features=True, max_shape_components=None,
                  max_appearance_components=None, boundary=3):
 
@@ -401,9 +400,9 @@ class LinearPatchAAMBuilder(PatchAAMBuilder):
         shape_model = GlobalAAMBuilder._build_shape_model(
             shapes, max_components)
 
-        self.n_landmarks = shape_model.mean.n_points
+        self.n_landmarks = shape_model.mean().n_points
 
-        self.reference_frame = self._build_reference_frame(shape_model.mean)
+        self.reference_frame = self._build_reference_frame(shape_model.mean())
 
         # compute non-linear transforms
         transforms = (
@@ -413,7 +412,7 @@ class LinearPatchAAMBuilder(PatchAAMBuilder):
         # build dense shapes
         dense_shapes = []
         for (t, s) in zip(transforms, shapes):
-            warped_points = t.apply(self.reference_frame.mask.true_indices)
+            warped_points = t.apply(self.reference_frame.mask.true_indices())
             dense_shape = PointCloud(np.vstack((s.points, warped_points)))
             dense_shapes.append(dense_shape)
 
@@ -423,7 +422,8 @@ class LinearPatchAAMBuilder(PatchAAMBuilder):
 
         return shape_model
 
-    def _warp_images(self, images, shapes, reference_shape, level_str, verbose):
+    def _warp_images(self, images, shapes, reference_shape, level_str,
+                     verbose):
 
         # warp images to reference frame
         warped_images = []
@@ -456,7 +456,7 @@ class PartsAAMBuilder(AAMBuilder):
 
     def __init__(self, parts_shape=(16, 16), features=None,
                  normalize_parts=False, diagonal=None, sigma=None,
-                 scales=(1, .5), scale_shapes=True, scale_features=True,
+                 scales=(1, .5), scale_shapes=False, scale_features=True,
                  max_shape_components=None, max_appearance_components=None):
 
         self.parts_shape = parts_shape

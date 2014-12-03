@@ -4,7 +4,8 @@ from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.pdm import OrthoPDM
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
 
-from .algorithm import StandardAAMInterface, PartsAAMInterface, AIC_GN
+from .algorithm import (StandardAAMInterface, LinearAAMInterface,
+                        PartsAAMInterface, AIC_GN)
 
 
 # Abstract Interface for AAM Fitters ------------------------------------------
@@ -72,11 +73,10 @@ class LinearAAMFitter(AAMFitter):
                                          self.dm.shape_models)):
 
             md_transform = OrthoLinearMDTransform(
-                sm, self.aam.n_landmarks,
-                source=am.mean().landmarks['source'].lms,
+                sm, self.dm.n_landmarks,
                 sigma2=am.noise_variance())
 
-            algorithm = algorithm_cls(StandardAAMInterface, am,
+            algorithm = algorithm_cls(LinearAAMInterface, am,
                                       md_transform, **kwargs)
 
             self._algorithms.append(algorithm)
@@ -99,8 +99,8 @@ class PartsAAMFitter(AAMFitter):
 
             pdm = OrthoPDM(sm, sigma2=am.noise_variance())
 
+            am.parts_shape = self.dm.parts_shape
+            am.normalize_parts = self.dm.normalize_parts
             algorithm = algorithm_cls(PartsAAMInterface, am, pdm, **kwargs)
-            algorithm.parts_shape = self.dm.parts_shape
-            algorithm.normalize_parts = self.dm.normalize_parts
 
             self._algorithms.append(algorithm)

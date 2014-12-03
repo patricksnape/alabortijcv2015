@@ -7,7 +7,7 @@ from menpofast.image import Image
 from menpofast.feature import gradient as fast_gradient
 from menpofast.utils import build_parts_image
 
-from .result import AAMAlgorithmResult
+from .result import AAMAlgorithmResult, LinearAAMAlgorithmResult
 
 
 # Abstract Interfaces for AAM Algorithms --------------------------------------
@@ -49,7 +49,7 @@ class StandardAAMInterface(AAMInterface):
     def __init__(self, aam_algorithm, sampling_step=None):
         super(StandardAAMInterface, self). __init__(aam_algorithm)
 
-        n_true_pixels = self.algorithm.template.n_true_pixels
+        n_true_pixels = self.algorithm.template.n_true_pixels()
         n_channels = self.algorithm.template.n_channels
         n_parameters = self.algorithm.transform.n_parameters
         sampling_mask = np.require(np.zeros(n_true_pixels), dtype=np.bool)
@@ -68,9 +68,11 @@ class StandardAAMInterface(AAMInterface):
         self.gradient2_mask = np.nonzero(np.tile(
             sampling_mask[None, None, None, ...], (2, 2, n_channels, 1)))
 
+        # self.eigenvalues = self.algorithm.transform.pdm.model.eigenvalues
+
     def dw_dp(self):
         dw_dp = np.rollaxis(self.algorithm.transform.d_dp(
-            self.algorithm.template.mask.true_indices), -1)
+            self.algorithm.template.mask.true_indices()), -1)
         return dw_dp[self.dw_dp_mask].reshape((dw_dp.shape[0], -1,
                                                dw_dp.shape[2]))
 
@@ -143,6 +145,12 @@ class StandardAAMInterface(AAMInterface):
 
         return dp
 
+    def algorithm_result(self, image, shape_parameters,
+                         appearance_parameters=None, gt_shape=None):
+        return AAMAlgorithmResult(
+            image, self.algorithm, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
+
 
 class LinearAAMInterface(StandardAAMInterface):
 
@@ -157,24 +165,28 @@ class LinearAAMInterface(StandardAAMInterface):
 
         return dp
 
+    def algorithm_result(self, image, shape_parameters,
+                         appearance_parameters=None, gt_shape=None):
+        return LinearAAMAlgorithmResult(
+            image, self.algorithm, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
+
 
 class PartsAAMInterface(AAMInterface):
 
-    def __init__(self, aam_algorithm, parts_mask):
+    def __init__(self, aam_algorithm, sampling_mask=None):
         super(PartsAAMInterface, self). __init__(aam_algorithm)
 
-        if parts_mask is None:
+        if sampling_mask is None:
             parts_shape = self.algorithm.appearance_model.parts_shape
-            parts_mask = np.require(np.ones((parts_shape)), dtype=np.bool)
+            sampling_mask = np.require(np.ones((parts_shape)), dtype=np.bool)
 
         image_shape = self.algorithm.template.pixels.shape
-        image_mask = np.tile(parts_mask[None, None, ...],
-                             image_shape[:2] + (1, 1))
+        image_mask = np.tile(sampling_mask[None, None, None, ...],
+                             image_shape[:3] + (1, 1))
         self.image_vec_mask = np.nonzero(image_mask.flatten())[0]
         self.gradient_mask = np.nonzero(np.tile(
-            image_mask[None, ...], (2, 1, 1, 1, 1)))
-        self.gradient2_mask = np.nonzero(np.tile(
-            image_mask[None, None, ...], (2, 2, 1, 1, 1, 1)))
+            image_mask[None, ...], (2, 1, 1, 1, 1, 1)))
 
     def dw_dp(self):
         return np.rollaxis(self.algorithm.transform.d_dp(None), -1)
@@ -194,21 +206,21 @@ class PartsAAMInterface(AAMInterface):
 
     def steepest_descent_images(self, gradient, dw_dp):
         # reshape gradient
-        # gradient: n_dims x n_channels x n_parts x (w x h)
+        # gradient: n_dims x n_parts x offsets x n_ch x (h x w)
         gradient = gradient[self.gradient_mask].reshape(
             gradient.shape[:-2] + (-1,))
         # compute steepest descent images
-        # gradient: n_dims x n_channels x n_parts x (w x h)
-        # dw_dp:    n_dims x            x n_parts x         x n_params
-        # sdi:               n_channels x n_parts x (w x h) x n_params
+        # gradient: n_dims x n_parts x offsets x n_ch x (h x w)
+        # ds_dp:    n_dims x n_parts x                          x n_params
+        # sdi:               n_parts x offsets x n_ch x (h x w) x n_params
         sdi = 0
-        a = gradient[..., None] * dw_dp[..., None, :, None, :]
+        a = gradient[..., None] * dw_dp[..., None, None, None, :]
         for d in a:
             sdi += d
 
         # reshape steepest descent images
-        # sdi: (n_channels x n_parts x w x h) x n_params
-        return sdi.reshape((-1, sdi.shape[3]))
+        # sdi: (n_parts x n_offsets x n_ch x w x h) x n_params
+        return sdi.reshape((-1, sdi.shape[-1]))
 
     def partial_newton_hessian(self, gradient2, dw_dp):
         # reshape gradient
@@ -248,6 +260,12 @@ class PartsAAMInterface(AAMInterface):
 
         return dp
 
+    def algorithm_result(self, image, shape_parameters,
+                         appearance_parameters=None, gt_shape=None):
+        return AAMAlgorithmResult(
+            image, self.algorithm, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
+
 
 # Abstract Interfaces for AAM Algorithms  -------------------------------------
 
@@ -256,20 +274,21 @@ class AAMAlgorithm(object):
     __metaclass__ = abc.ABCMeta
 
     def __init__(self, aam_interface, appearance_model, transform,
-                 mask=None, eps=10**-5):
+                 eps=10**-5, **kwargs):
 
         # set common state for all AAM algorithms
         self.appearance_model = appearance_model
-        self.template = appearance_model.mean
+        self.template = appearance_model.mean()
         self.transform = transform
         self.eps = eps
 
         # set interface
-        self.interface = aam_interface(self, mask)
+        self.interface = aam_interface(self, **kwargs)
 
         self._U = self.appearance_model.components.T
         self._pinv_U = np.linalg.pinv(
             self._U[self.interface.image_vec_mask, :]).T
+
 
     @abc.abstractmethod
     def _precompute(self, **kwargs):
@@ -283,47 +302,46 @@ class AAMAlgorithm(object):
 class ProjectOut(AAMAlgorithm):
 
     def __init__(self, aam_interface, appearance_model, transform,
-                 mask=None, eps=10**-5):
+                 eps=10**-5, **kwargs):
         # call super constructor
         super(ProjectOut, self).__init__(
-            aam_interface, appearance_model, transform, mask, eps)
+            aam_interface, appearance_model, transform, eps, **kwargs)
 
-        # set common state for all Bayesian AAM algorithms
-        self._U = self._U[self.interface.image_vec_mask, :]
+        # set common state for all Project Out AAM algorithms
+        self._masked_U = self._U[self.interface.image_vec_mask, :]
 
         # pre-compute
         self._precompute()
-
+        
     def project_out(self, j):
-        return j - self._U.dot(self._pinv_U.T.dot(j))
+        return j - self._masked_U.dot(self._pinv_U.T.dot(j))
 
 
 class FastSimultaneous(AAMAlgorithm):
 
     def __init__(self, aam_interface, appearance_model, transform,
-                 mask=None, eps=10**-5):
+                 eps=10**-5, **kwargs):
         # call super constructor
         super(FastSimultaneous, self).__init__(
-            aam_interface, appearance_model, transform, mask, eps)
-
-        # set common state for all Bayesian AAM algorithms
+            aam_interface, appearance_model, transform, eps, **kwargs)
+        
+        # set common state for all Fast Simultaneous AAM algorithms
         self._masked_U = self._U[self.interface.image_vec_mask, :]
 
         # pre-compute
         self._precompute()
 
     def project_out(self, j):
-
         return j - self._masked_U.dot(self._pinv_U.T.dot(j))
 
 
 class Alternating(AAMAlgorithm):
 
     def __init__(self, aam_interface, appearance_model, transform,
-                 mask=None, eps=10**-5):
+                 eps=10**-5, **kwargs):
         # call super constructor
         super(Alternating, self).__init__(
-            aam_interface, appearance_model, transform, mask, eps)
+            aam_interface, appearance_model, transform, eps, **kwargs)
 
         # pre-compute
         self._precompute()
@@ -407,8 +425,8 @@ class PIC_SD(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class PIC_GN(ProjectOut):
@@ -434,13 +452,13 @@ class PIC_GN(ProjectOut):
         self._h = self._j_po.T.dot(j)
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -469,8 +487,8 @@ class PIC_GN(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class PIC_N(ProjectOut):
@@ -502,13 +520,13 @@ class PIC_N(ProjectOut):
         self._h_pn = self.interface.partial_newton_hessian(nabla2_t, dw_dp)
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
          # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -542,8 +560,8 @@ class PIC_N(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class PFC_SD(ProjectOut):
@@ -594,8 +612,8 @@ class PFC_SD(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class PFC_GN(ProjectOut):
@@ -609,13 +627,13 @@ class PFC_GN(ProjectOut):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -655,8 +673,8 @@ class PFC_GN(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class PFC_N(ProjectOut):
@@ -670,13 +688,13 @@ class PFC_N(ProjectOut):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # mask model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -723,8 +741,8 @@ class PFC_N(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class PSC_GN(ProjectOut):
@@ -741,13 +759,13 @@ class PSC_GN(ProjectOut):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True, a=0.5):
+            prior=False, a=0.5):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -790,8 +808,8 @@ class PSC_GN(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class PBC_GN(ProjectOut):
@@ -808,14 +826,14 @@ class PBC_GN(ProjectOut):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         n_shape_params = self.transform.n_parameters
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -861,8 +879,8 @@ class PBC_GN(ProjectOut):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 # Fast Simultaneous Compositional Algorithms ----------------------------------
@@ -884,7 +902,7 @@ class FastSIC_GN(FastSimultaneous):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
@@ -892,7 +910,7 @@ class FastSIC_GN(FastSimultaneous):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -947,9 +965,9 @@ class FastSIC_GN(FastSimultaneous):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 class FastSIC_N(FastSimultaneous):
@@ -974,7 +992,7 @@ class FastSIC_N(FastSimultaneous):
         self._inv_h_U = np.linalg.inv(self._masked_U.T.dot(self._masked_U))
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
          # initialize transform
         self.transform.set_target(initial_shape)
@@ -982,7 +1000,7 @@ class FastSIC_N(FastSimultaneous):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -1053,9 +1071,9 @@ class FastSIC_N(FastSimultaneous):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 class FastSSC_GN(FastSimultaneous):
@@ -1066,7 +1084,7 @@ class FastSSC_GN(FastSimultaneous):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True, a=0.5):
+            prior=False, a=0.5):
 
         # initialize transform
         self.transform.set_target(initial_shape)
@@ -1074,7 +1092,7 @@ class FastSSC_GN(FastSimultaneous):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -1133,9 +1151,9 @@ class FastSSC_GN(FastSimultaneous):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 class FastSBC_GN(FastSimultaneous):
@@ -1146,7 +1164,7 @@ class FastSBC_GN(FastSimultaneous):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
@@ -1155,7 +1173,7 @@ class FastSBC_GN(FastSimultaneous):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -1217,9 +1235,9 @@ class FastSBC_GN(FastSimultaneous):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 # Alternating Compositional Algorithms ----------------------------------------
@@ -1241,7 +1259,7 @@ class AIC_GN(Alternating):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
@@ -1249,7 +1267,7 @@ class AIC_GN(Alternating):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -1294,9 +1312,9 @@ class AIC_GN(Alternating):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 class AIC_N(Alternating):
@@ -1310,7 +1328,7 @@ class AIC_N(Alternating):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
@@ -1318,7 +1336,7 @@ class AIC_N(Alternating):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -1367,9 +1385,9 @@ class AIC_N(Alternating):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 class ASC_GN(Alternating):
@@ -1383,7 +1401,7 @@ class ASC_GN(Alternating):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True, a=0.5):
+            prior=False, a=0.5):
 
         # initialize transform
         self.transform.set_target(initial_shape)
@@ -1391,7 +1409,7 @@ class ASC_GN(Alternating):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -1439,9 +1457,9 @@ class ASC_GN(Alternating):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 class ABC_GN(Alternating):
@@ -1455,7 +1473,7 @@ class ABC_GN(Alternating):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True):
+            prior=False):
 
         # initialize transform
         self.transform.set_target(initial_shape)
@@ -1464,7 +1482,7 @@ class ABC_GN(Alternating):
         # initial appearance parameters
         appearance_parameters = [0]
         # model mean
-        m = self.appearance_model.mean.as_vector()
+        m = self.appearance_model.mean().as_vector()
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
@@ -1515,9 +1533,9 @@ class ABC_GN(Alternating):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  appearance_parameters=appearance_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
 # Bayesian Compositional Algorithms -------------------------------------------
@@ -1539,13 +1557,13 @@ class BFC_GN(Bayesian):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True, l=0.5):
+            prior=False, l=0.5):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -1585,8 +1603,8 @@ class BFC_GN(Bayesian):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class BFC_N(Bayesian):
@@ -1600,13 +1618,13 @@ class BFC_N(Bayesian):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True, l=0.5):
+            prior=False, l=0.5):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # mask model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -1653,8 +1671,8 @@ class BFC_N(Bayesian):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class BSC_GN(Bayesian):
@@ -1671,13 +1689,13 @@ class BSC_GN(Bayesian):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True, l=0.5, a=0.5):
+            prior=False, l=0.5, a=0.5):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -1720,8 +1738,8 @@ class BSC_GN(Bayesian):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
 
 
 class BBC_GN(Bayesian):
@@ -1738,14 +1756,14 @@ class BBC_GN(Bayesian):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=True, l=0.5):
+            prior=False, l=0.5):
 
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         n_shape_params = self.transform.n_parameters
         # masked model mean
-        masked_m = self.appearance_model.mean.as_vector()[
+        masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
         for _ in xrange(max_iters):
@@ -1791,5 +1809,5 @@ class BBC_GN(Bayesian):
                 break
 
         # return aam algorithm result
-        return AAMAlgorithmResult(image, self, shape_parameters,
-                                  gt_shape=gt_shape)
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)

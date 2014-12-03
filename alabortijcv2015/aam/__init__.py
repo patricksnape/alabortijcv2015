@@ -1,4 +1,7 @@
-from .base import GlobalAAM, PartsAAM
-from .builder import GlobalAAMBuilder, PartsAAMBuilder
-from .fitter import GlobalAAMFitter, PartsAAMFitter
-from .algorithm import PIC, AIC
+from .base import (GlobalAAM, PatchAAM,
+                   LinearGlobalAAM, LinearPatchAAM,
+                   PartsAAM)
+from .builder import (GlobalAAMBuilder, PatchAAMBuilder,
+                      LinearGlobalAAMBuilder, LinearPatchAAMBuilder,
+                      PartsAAMBuilder)
+from .fitter import StandardAAMFitter, LinearAAMFitter, PartsAAMFitter
