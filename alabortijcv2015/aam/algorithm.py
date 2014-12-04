@@ -1903,7 +1903,7 @@ class BIC(Bayesian):
                 break
 
             # save cost
-            cost.append(e.T.dot(self.project_out(e)))
+            cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
 
         # return aam algorithm result
         return self.interface.algorithm_result(image, shape_parameters, cost,
@@ -2047,7 +2047,7 @@ class BFC(Bayesian):
                 break
 
             # save cost
-            cost.append(e.T.dot(self.project_out(e)))
+            cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
 
         # return aam algorithm result
         return self.interface.algorithm_result(image, shape_parameters, cost,
@@ -2192,7 +2192,7 @@ class BSC(Bayesian):
                 break
 
             # save cost
-            cost.append(e.T.dot(self.project_out(e)))
+            cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
 
         # return aam algorithm result
         return self.interface.algorithm_result(image, shape_parameters, cost,
@@ -2250,7 +2250,7 @@ class BBC(Bayesian):
             # compute hessian
             h = j_po.T.dot(j)
 
-             # compute symmetric esm parameter updates
+            # compute symmetric esm parameter updates
             dp = self.interface.solve(h, j_po, e, prior)
 
             # update transform
@@ -2268,7 +2268,7 @@ class BBC(Bayesian):
                 break
 
             # save cost
-            cost.append(e.T.dot(self.project_out(e)))
+            cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
 
         # return aam algorithm result
         return self.interface.algorithm_result(image, shape_parameters, cost,
