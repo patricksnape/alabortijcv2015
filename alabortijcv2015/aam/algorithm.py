@@ -145,10 +145,10 @@ class StandardAAMInterface(AAMInterface):
 
         return dp
 
-    def algorithm_result(self, image, shape_parameters,
+    def algorithm_result(self, image, shape_parameters, cost,
                          appearance_parameters=None, gt_shape=None):
         return AAMAlgorithmResult(
-            image, self.algorithm, shape_parameters,
+            image, self.algorithm, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -165,10 +165,10 @@ class LinearAAMInterface(StandardAAMInterface):
 
         return dp
 
-    def algorithm_result(self, image, shape_parameters,
+    def algorithm_result(self, image, shape_parameters, cost,
                          appearance_parameters=None, gt_shape=None):
         return LinearAAMAlgorithmResult(
-            image, self.algorithm, shape_parameters,
+            image, self.algorithm, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -262,10 +262,10 @@ class PartsAAMInterface(AAMInterface):
 
         return dp
 
-    def algorithm_result(self, image, shape_parameters,
+    def algorithm_result(self, image, shape_parameters, cost,
                          appearance_parameters=None, gt_shape=None):
         return AAMAlgorithmResult(
-            image, self.algorithm, shape_parameters,
+            image, self.algorithm, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -403,6 +403,8 @@ class PIC(ProjectOut):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -435,8 +437,11 @@ class PIC(ProjectOut):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -471,7 +476,9 @@ class PICN(ProjectOut):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
-         # initialize transform
+        # initialize cost
+        cost = []
+        # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
@@ -503,13 +510,16 @@ class PICN(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(target.points -
-                                          self.transform.target.points))
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e_po))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -526,6 +536,8 @@ class PFC(ProjectOut):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -569,8 +581,11 @@ class PFC(ProjectOut):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -587,6 +602,8 @@ class PFCN(ProjectOut):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -632,13 +649,16 @@ class PFCN(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(target.points -
-                                          self.transform.target.points))
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e_po))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -658,6 +678,8 @@ class PSC(ProjectOut):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, a=0.5):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -704,8 +726,11 @@ class PSC(ProjectOut):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -725,6 +750,8 @@ class PBC(ProjectOut):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -775,8 +802,11 @@ class PBC(ProjectOut):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -795,6 +825,8 @@ class SIC(Simultaneous):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -855,9 +887,12 @@ class SIC(Simultaneous):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -885,7 +920,9 @@ class SICN(Simultaneous):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
-         # initialize transform
+        # initialize cost
+        cost = []
+        # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # initial appearance parameters
@@ -956,18 +993,20 @@ class SICN(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(target.points -
-                                          self.transform.target.points))
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
-# TODO
 class SFC(Simultaneous):
     r"""
     Fast Simultaneous Inverse Compositional Gauss-Newton Algorithm
@@ -981,6 +1020,8 @@ class SFC(Simultaneous):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1017,10 +1058,10 @@ class SFC(Simultaneous):
             e = masked_m - masked_i
 
             # compute model gradient
-            nabla_t = self.interface.gradient(self.template)
+            nabla_i = self.interface.gradient(i)
 
             # compute model jacobian
-            j = self.interface.steepest_descent_images(nabla_t, self._dw_dp)
+            j = self.interface.steepest_descent_images(nabla_i, self._dw_dp)
             # project out appearance model from model jacobian
             j_po = self.project_out(j)
 
@@ -1041,13 +1082,15 @@ class SFC(Simultaneous):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
-# TODO
 class SFCN(Simultaneous):
 
     def _precompute(self):
@@ -1072,7 +1115,9 @@ class SFCN(Simultaneous):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
-         # initialize transform
+        # initialize cost
+        cost = []
+        # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # initial appearance parameters
@@ -1110,19 +1155,19 @@ class SFCN(Simultaneous):
             e = masked_i - masked_m
 
             # compute model gradient
-            nabla_t = self.interface.gradient(self.template)
+            nabla_i = self.interface.gradient(i)
             # compute model second order gradient
-            nabla2_t = self.interface.gradient(Image(nabla_t))
+            nabla2_i = self.interface.gradient(Image(nabla_i))
 
             # compute model jacobian
-            j = self.interface.steepest_descent_images(nabla_t, self._dw_dp)
+            j = self.interface.steepest_descent_images(nabla_i, self._dw_dp)
             # project out appearance model from model jacobian
             j_po = self.project_out(j)
 
             # compute gauss-newton hessian
             h_gn = j_po.T.dot(j)
             # compute partial newton hessian
-            h_pn = self.interface.partial_newton_hessian(nabla2_t, self._dw_dp)
+            h_pn = self.interface.partial_newton_hessian(nabla2_i, self._dw_dp)
             # project out appearance model from error
             e_po = self.project_out(e)
             # compute cp hessian
@@ -1143,14 +1188,17 @@ class SFCN(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(target.points -
-                                          self.transform.target.points))
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -1164,6 +1212,8 @@ class SSC(Simultaneous):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, a=0.5):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1228,9 +1278,12 @@ class SSC(Simultaneous):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -1244,6 +1297,8 @@ class SBC(Simultaneous):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1280,7 +1335,7 @@ class SBC(Simultaneous):
             # compute error image
             e = masked_m - masked_i
 
-           # combine image and model gradient
+            # combine image and model gradient
             nabla_i = self.interface.gradient(i)
             nabla_t = self.interface.gradient(self.template)
 
@@ -1312,9 +1367,12 @@ class SBC(Simultaneous):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -1333,6 +1391,8 @@ class AIC(Alternating):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1383,9 +1443,12 @@ class AIC(Alternating):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -1402,6 +1465,8 @@ class AICN(Alternating):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1456,12 +1521,15 @@ class AICN(Alternating):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
-# TODO
+
 class AFC(Alternating):
     r"""
     Alternating Inverse Compositional Gauss-Newton Algorithm
@@ -1475,6 +1543,8 @@ class AFC(Alternating):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1503,10 +1573,10 @@ class AFC(Alternating):
                  masked_i)
 
             # compute model gradient
-            nabla_t = self.interface.gradient(self.template)
+            nabla_i = self.interface.gradient(i)
 
             # compute model jacobian
-            j = self.interface.steepest_descent_images(nabla_t, self._dw_dp)
+            j = self.interface.steepest_descent_images(nabla_i, self._dw_dp)
 
             # compute hessian
             h = j.T.dot(j)
@@ -1525,13 +1595,15 @@ class AFC(Alternating):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
-# TODO
 class AFCN(Alternating):
     r"""
     Alternating Inverse Compositional Newton Algorithm
@@ -1545,6 +1617,8 @@ class AFCN(Alternating):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1561,27 +1635,28 @@ class AFCN(Alternating):
             i = self.interface.warp(image)
 
             # reconstruct appearance
-            i = i.as_vector()[self.interface.image_vec_mask]
-            c = self._pinv_U.T.dot(i - masked_m)
+            masked_i = i.as_vector()[self.interface.image_vec_mask]
+            c = self._pinv_U.T.dot(masked_i - masked_m)
             t = self._U.dot(c) + m
             self.template.from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
-            e = self.template.as_vector()[self.interface.image_vec_mask] - i
+            e = (self.template.as_vector()[self.interface.image_vec_mask] -
+                 masked_i)
 
             # compute model gradient
-            nabla_t = self.interface.gradient(self.template)
+            nabla_i = self.interface.gradient(i)
             # compute model second order gradient
-            nabla2_t = self.interface.gradient(Image(nabla_t))
+            nabla2_i = self.interface.gradient(Image(nabla_i))
 
             # compute model jacobian
-            j = self.interface.steepest_descent_images(nabla_t, self._dw_dp)
+            j = self.interface.steepest_descent_images(nabla_i, self._dw_dp)
 
             # compute gauss-newton hessian
             h_gn = j.T.dot(j)
             # compute partial newton hessian
-            h_pn = self.interface.partial_newton_hessian(nabla2_t, self._dw_dp)
+            h_pn = self.interface.partial_newton_hessian(nabla2_i, self._dw_dp)
             # compute full newton hessian
             h = e.dot(h_pn).reshape(h_gn.shape) + h_gn
 
@@ -1599,9 +1674,12 @@ class AFCN(Alternating):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -1618,6 +1696,8 @@ class ASC(Alternating):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, a=0.5):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1671,9 +1751,12 @@ class ASC(Alternating):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -1690,6 +1773,8 @@ class ABC(Alternating):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1747,9 +1832,12 @@ class ABC(Alternating):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e))
+
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters,
+            image, shape_parameters, cost,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -1780,6 +1868,8 @@ class BIC(Bayesian):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1812,8 +1902,11 @@ class BIC(Bayesian):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -1848,7 +1941,9 @@ class BICN(Bayesian):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False):
 
-         # initialize transform
+        # initialize cost
+        cost = []
+        # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
         # masked model mean
@@ -1867,7 +1962,7 @@ class BICN(Bayesian):
             e = masked_m - masked_i
 
             # project out appearance model from error
-            e_po = self.project_out(e)
+            e_po = self.project_out(e[..., None])[..., 0]
             # compute full newton hessian
             h = e_po.dot(self._h_pn).reshape(self._h_gn.shape) + self._h_gn
 
@@ -1880,13 +1975,16 @@ class BICN(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(target.points -
-                                          self.transform.target.points))
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e_po))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -1903,6 +2001,8 @@ class BFC(Bayesian):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, l=0.5):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -1946,8 +2046,11 @@ class BFC(Bayesian):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -1964,6 +2067,8 @@ class BFCN(Bayesian):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, l=0.5):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -2009,13 +2114,16 @@ class BFCN(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(target.points -
-                                          self.transform.target.points))
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(e_po))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -2035,6 +2143,8 @@ class BSC(Bayesian):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, l=0.5, a=0.5):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -2081,8 +2191,11 @@ class BSC(Bayesian):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)
 
 
@@ -2102,6 +2215,8 @@ class BBC(Bayesian):
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, l=0.5):
 
+        # initialize cost
+        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
@@ -2152,6 +2267,9 @@ class BBC(Bayesian):
             if error < self.eps:
                 break
 
+            # save cost
+            cost.append(e.T.dot(self.project_out(e)))
+
         # return aam algorithm result
-        return self.interface.algorithm_result(image, shape_parameters,
+        return self.interface.algorithm_result(image, shape_parameters, cost,
                                                gt_shape=gt_shape)

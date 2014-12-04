@@ -137,8 +137,8 @@ class Fitter(object):
                                       gt_shapes=gt_shapes, **kwargs)
 
         # build multilevel fitting result
-        fitter_result = FitterResult(
-            image, self, algorithm_results, affine_correction,
+        fitter_result = self._fitter_result(
+            image, algorithm_results, affine_correction,
             gt_shape=gt_shape)
 
         return fitter_result
@@ -337,3 +337,8 @@ class Fitter(object):
                              'containing 1 or {} elements or '
                              'None'.format(self.n_levels))
         return np.require(max_iters, dtype=np.int)
+
+    @abc.abstractmethod
+    def _fitter_result(self, image, algorithm_results, affine_correction,
+                       gt_shape=None):
+        pass

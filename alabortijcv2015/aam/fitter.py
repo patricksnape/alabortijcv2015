@@ -5,7 +5,8 @@ from alabortijcv2015.pdm import OrthoPDM
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
 
 from .algorithm import (StandardAAMInterface, LinearAAMInterface,
-                        PartsAAMInterface, AIC_GN)
+                        PartsAAMInterface, AIC)
+from .result import AAMFitterResult
 
 
 # Abstract Interface for AAM Fitters ------------------------------------------
@@ -28,12 +29,17 @@ class AAMFitter(Fitter):
                                  'or None or a list containing 1 or {} of '
                                  'those'.format(self.dm.n_levels))
 
+    def _fitter_result(self, image, algorithm_results, affine_correction,
+                       gt_shape=None):
+        return AAMFitterResult(image, self, algorithm_results,
+                               affine_correction, gt_shape=gt_shape)
+
 
 # Concrete Implementations of AAM Fitters -------------------------------------
 
 class StandardAAMFitter(AAMFitter):
 
-    def __init__(self, global_aam, algorithm_cls=AIC_GN,
+    def __init__(self, global_aam, algorithm_cls=AIC,
                  n_shape=None, n_appearance=None, **kwargs):
 
         super(StandardAAMFitter, self).__init__()
@@ -59,7 +65,7 @@ class StandardAAMFitter(AAMFitter):
 
 class LinearAAMFitter(AAMFitter):
 
-    def __init__(self, global_aam, algorithm_cls=AIC_GN,
+    def __init__(self, global_aam, algorithm_cls=AIC,
                  n_shape=None, n_appearance=None, **kwargs):
 
         super(LinearAAMFitter, self).__init__()
@@ -84,7 +90,7 @@ class LinearAAMFitter(AAMFitter):
 
 class PartsAAMFitter(AAMFitter):
 
-    def __init__(self, parts_aam, algorithm_cls=AIC_GN,
+    def __init__(self, parts_aam, algorithm_cls=AIC,
                  n_shape=None, n_appearance=None, **kwargs):
 
         super(PartsAAMFitter, self).__init__()
