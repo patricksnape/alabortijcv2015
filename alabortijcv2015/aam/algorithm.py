@@ -350,22 +350,22 @@ class Alternating(AAMAlgorithm):
 class Bayesian(AAMAlgorithm):
 
     def __init__(self, aam_interface, appearance_model, transform,
-                 mask=None, eps=10**-5):
+                 eps=10**-5, **kwargs):
 
         # call super constructor
         super(Bayesian, self).__init__(
-            aam_interface, appearance_model, transform, mask, eps)
+            aam_interface, appearance_model, transform, eps, **kwargs)
 
         # set common state for all Bayesian AAM algorithms
         self._U = self._U[self.interface.image_vec_mask, :]
-        sigma2 = self.appearance_model.noise_variance
+        sigma2 = self.appearance_model.noise_variance()
         self._inv_sigma2 = 1 / sigma2
         self._inv_D = 1 / (self.appearance_model.eigenvalues + sigma2)
 
         # pre-compute
         self._precompute()
 
-    def _project_out(self, j, l):
+    def project_out(self, j, l=0.5):
         l_inv_sigma2 = l * self._inv_sigma2
         A = l_inv_sigma2 - (1 - l) * self._inv_D
         return 2 * (l_inv_sigma2 * j -
@@ -1540,6 +1540,220 @@ class ABC_GN(Alternating):
 
 # Bayesian Compositional Algorithms -------------------------------------------
 
+class BIC_GN(Bayesian):
+    r"""
+    Project-Out Inverse Compositional Gauss-Newton Algorithm
+    """
+
+    def _precompute(self):
+
+        # compute model's gradient
+        nabla_t = self.interface.gradient(self.template)
+
+        # compute warp jacobian
+        dw_dp = self.interface.dw_dp()
+
+        # compute steepest descent images
+        j = self.interface.steepest_descent_images(nabla_t, dw_dp)
+
+        # project out appearance model from J
+        self._j_po = self.project_out(j)
+
+        # compute inverse hessian
+        self._h = self._j_po.T.dot(j)
+
+    def run(self, image, initial_shape, gt_shape=None, max_iters=20,
+            prior=False):
+
+        # initialize transform
+        self.transform.set_target(initial_shape)
+        shape_parameters = [self.transform.as_vector()]
+        # masked model mean
+        masked_m = self.appearance_model.mean().as_vector()[
+            self.interface.image_vec_mask]
+
+        for _ in xrange(max_iters):
+
+            # compute warped image with current weights
+            i = self.interface.warp(image)
+
+            # reconstruct appearance
+            masked_i = i.as_vector()[self.interface.image_vec_mask]
+
+            # compute error image
+            e = masked_m - masked_i
+
+            # compute gauss-newton parameter updates
+            dp = self.interface.solve(self._h, self._j_po, e, prior)
+
+            # update transform
+            target = self.transform.target
+            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            shape_parameters.append(self.transform.as_vector())
+
+            # test convergence
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
+            if error < self.eps:
+                break
+
+        # return aam algorithm result
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
+
+
+class BIC_N(Bayesian):
+    r"""
+    Project-Out Inverse Compositional Newton Algorithm
+    """
+
+    def _precompute(self):
+
+        # compute model gradient
+        nabla_t = self.interface.gradient(self.template)
+
+        # compute model second gradient
+        nabla2_t = self.interface.gradient(Image(nabla_t))
+
+        # compute warp jacobian
+        dw_dp = self.interface.dw_dp()
+
+        # compute steepest descent images
+        j = self.interface.steepest_descent_images(nabla_t, dw_dp)
+
+        # project out appearance model from J
+        self._j_po = self.project_out(j)
+
+        # compute gauss-newton hessian
+        self._h_gn = self._j_po.T.dot(j)
+
+        # compute newton hessian
+        self._h_pn = self.interface.partial_newton_hessian(nabla2_t, dw_dp)
+
+    def run(self, image, initial_shape, gt_shape=None, max_iters=20,
+            prior=False):
+
+         # initialize transform
+        self.transform.set_target(initial_shape)
+        shape_parameters = [self.transform.as_vector()]
+        # masked model mean
+        masked_m = self.appearance_model.mean().as_vector()[
+            self.interface.image_vec_mask]
+
+        for _ in xrange(max_iters):
+
+            # compute warped image with current weights
+            i = self.interface.warp(image)
+
+            # reconstruct appearance
+            masked_i = i.as_vector()[self.interface.image_vec_mask]
+
+            # compute error image
+            e = masked_m - masked_i
+
+            # project out appearance model from error
+            e_po = self.project_out(e)
+            # compute full newton hessian
+            h = e_po.dot(self._h_pn).reshape(self._h_gn.shape) + self._h_gn
+
+            # compute gauss-newton parameter updates
+            dp = self.interface.solve(h, self._j_po, e, prior)
+
+            # update transform
+            target = self.transform.target
+            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            shape_parameters.append(self.transform.as_vector())
+
+            # test convergence
+            error = np.abs(np.linalg.norm(target.points -
+                                          self.transform.target.points))
+            if error < self.eps:
+                break
+
+        # return aam algorithm result
+        return self.interface.algorithm_result(image, shape_parameters,
+                                               gt_shape=gt_shape)
+
+
+class BIC2_GN(Bayesian):
+    r"""
+    Fast Simultaneous Inverse Compositional Gauss-Newton Algorithm
+    """
+
+    def _precompute(self):
+
+        # compute warp jacobian
+        self._dw_dp = self.interface.dw_dp()
+
+    def run(self, image, initial_shape, gt_shape=None, max_iters=20,
+            prior=False):
+
+        # initialize transform
+        self.transform.set_target(initial_shape)
+        shape_parameters = [self.transform.as_vector()]
+        # initial appearance parameters
+        appearance_parameters = [0]
+        # model mean
+        m = self.appearance_model.mean().as_vector()
+        # masked model mean
+        masked_m = m[self.interface.image_vec_mask]
+
+        for _ in xrange(max_iters):
+
+            # warp image
+            i = self.interface.warp(image)
+            # mask image
+            masked_i = i.as_vector()[self.interface.image_vec_mask]
+
+            if _ == 0:
+                # project image onto the model bases
+                c = self._pinv_U.T.dot(masked_i - masked_m)
+            else:
+                # compute gauss-newton appearance parameters updates
+                masked_t = self.template.as_vector()[
+                    self.interface.image_vec_mask]
+                dc = self._pinv_U.T.dot(masked_i - masked_t + j.dot(dp))
+                c += dc
+
+            # reconstruct appearance
+            t = self._U.dot(c) + m
+            self.template.from_vector_inplace(t)
+            appearance_parameters.append(c)
+
+            # compute error image
+            e = masked_m - masked_i
+
+            # compute model gradient
+            nabla_t = self.interface.gradient(self.template)
+
+            # compute model jacobian
+            j = self.interface.steepest_descent_images(nabla_t, self._dw_dp)
+            # project out appearance model from model jacobian
+            j_po = self.project_out(j)
+
+            # compute hessian
+            h = j_po.T.dot(j)
+
+            # compute gauss-newton parameter updates
+            dp = self.interface.solve(h, j_po, e, prior)
+
+            # update transform
+            target = self.transform.target
+            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            shape_parameters.append(self.transform.as_vector())
+
+            # test convergence
+            error = np.abs(np.linalg.norm(
+                target.points - self.transform.target.points))
+            if error < self.eps:
+                break
+
+        # return aam algorithm result
+        return self.interface.algorithm_result(
+            image, shape_parameters,
+            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
+
+
 class BFC_SD(Bayesian):
     r"""
     Bayesian Forward Compositional Steepest-Descent Algorithm
@@ -1580,16 +1794,16 @@ class BFC_GN(Bayesian):
             # compute image gradient
             nabla_i = self.interface.gradient(i)
 
-           # compute model jacobian
+            # compute model jacobian
             j = self.interface.steepest_descent_images(nabla_i, self._dw_dp)
             # project out appearance model from model jacobian
-            j_po = self._project_out(j, l)
+            j_po = self.project_out(j, l)
 
             # compute hessian
             h = j_po.T.dot(j)
 
             # compute gauss-newton parameter updates
-            dp = self.interface.solve(h, j, e, prior)
+            dp = self.interface.solve(h, j_po, e, prior)
 
             # update transform
             target = self.transform.target
@@ -1645,14 +1859,14 @@ class BFC_N(Bayesian):
             # compute model jacobian
             j = self.interface.steepest_descent_images(nabla_i, self._dw_dp)
             # project out appearance model from model jacobian
-            j_po = self._project_out(j, l)
+            j_po = self.project_out(j, l)
 
             # compute gauss-newton hessian
             h_gn = j_po.T.dot(j)
             # compute partial newton hessian
             h_pn = self.interface.partial_newton_hessian(nabla2_i, self._dw_dp)
             # project out appearance model from error
-            e_po = self._project_out(e[..., None], l)[..., 0]
+            e_po = self.project_out(e[..., None], l)[..., 0]
             # compute full newton hessian
             h = e_po.dot(h_pn).reshape(h_gn.shape) + h_gn
 
@@ -1715,7 +1929,7 @@ class BSC_GN(Bayesian):
             # compute model jacobian
             j = self.interface.steepest_descent_images(nabla, self._dw_dp)
             # project out appearance model from model jacobian
-            j_po = self._project_out(j, l)
+            j_po = self.project_out(j, l)
 
             # compute hessian
             h = j_po.T.dot(j)
@@ -1786,7 +2000,7 @@ class BBC_GN(Bayesian):
                                                          self._dw_dp)
             j = np.hstack((j_i, j_t))
             # project out appearance model from  jacobian
-            j_po = self._project_out(j, l)
+            j_po = self.project_out(j, l)
 
             # compute hessian
             h = j_po.T.dot(j)
