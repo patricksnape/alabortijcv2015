@@ -9,7 +9,6 @@ from menpofit.base import noisy_align
 from menpofit.fitter import align_shape_with_bb
 
 from .utils import fsmooth
-from .result import FitterResult
 
 
 # Abstract Interface for Fitters ------------------------------------------
