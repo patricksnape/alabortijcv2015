@@ -2,6 +2,7 @@ from __future__ import division
 import abc
 
 import numpy as np
+import scipy
 
 from menpofast.image import Image
 from menpofast.feature import gradient as fast_gradient
@@ -141,7 +142,10 @@ class StandardAAMInterface(AAMInterface):
                                   t.j_prior * t.as_vector() - jp.dot(dp))
         else:
             dp = np.linalg.solve(h, j.T.dot(e))
-            dp = jp.dot(dp)
+            if jp.shape[0] is dp.shape[0]:
+                dp = jp.dot(dp)
+            else:
+                dp = scipy.linalg.block_diag(jp, jp).dot(dp)
 
         return dp
 
@@ -326,7 +330,10 @@ class Simultaneous(AAMAlgorithm):
         # call super constructor
         super(Simultaneous, self).__init__(
             aam_interface, appearance_model, transform, eps, **kwargs)
-        
+
+        # set auxiliary template
+        self.template2 = self.template.copy()
+
         # set common state for all Fast Simultaneous AAM algorithms
         self._masked_U = self._U[self.interface.image_vec_mask, :]
 
@@ -432,10 +439,10 @@ class PIC(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e)))
@@ -510,10 +517,10 @@ class PICN(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e_po))
@@ -576,10 +583,10 @@ class PFC(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e)))
@@ -649,10 +656,10 @@ class PFCN(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e_po))
@@ -721,10 +728,10 @@ class PSC(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e)))
@@ -797,10 +804,10 @@ class PBC(ProjectOut):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e)))
@@ -882,10 +889,10 @@ class SIC(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -909,8 +916,8 @@ class SICN(Simultaneous):
         self._j_U = np.zeros((self.appearance_model.n_active_components,
                               n_pixels, self.transform.n_parameters))
         for k, u in enumerate(self._U.T):
-            nabla_u = self.interface.gradient(Image(u.reshape(
-                self.template.pixels.shape)))
+            self.template2.from_vector_inplace(u)
+            nabla_u = self.interface.gradient(self.template2)
             j_u = self.interface.steepest_descent_images(nabla_u, self._dw_dp)
             self._j_U[k, ...] = j_u
 
@@ -993,10 +1000,10 @@ class SICN(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1077,10 +1084,10 @@ class SFC(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1188,10 +1195,10 @@ class SFCN(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1238,7 +1245,7 @@ class SSC(Simultaneous):
                 # compute gauss-newton appearance parameters updates
                 masked_t = self.template.as_vector()[
                     self.interface.image_vec_mask]
-                dc = self._pinv_U.T.dot(masked_i - masked_t + j.dot(2 * dp))
+                dc = self._pinv_U.T.dot(masked_i - masked_t + j.dot(dp))
                 c += dc
 
             # reconstruct appearance
@@ -1273,10 +1280,10 @@ class SSC(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1362,10 +1369,10 @@ class SBC(Simultaneous):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1438,10 +1445,10 @@ class AIC(Alternating):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1516,10 +1523,10 @@ class AICN(Alternating):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1559,10 +1566,9 @@ class AFC(Alternating):
 
             # warp image
             i = self.interface.warp(image)
-            # mask image
-            masked_i = i.as_vector()[self.interface.image_vec_mask]
-
+            
             # reconstruct appearance
+            masked_i = i.as_vector()[self.interface.image_vec_mask]
             c = self._pinv_U.T.dot(masked_i - masked_m)
             t = self._U.dot(c) + m
             self.template.from_vector_inplace(t)
@@ -1586,14 +1592,16 @@ class AFC(Alternating):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            dt = self.transform.from_vector(dp)
+            self.transform.from_vector_inplace(
+                self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1669,10 +1677,10 @@ class AFCN(Alternating):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1740,16 +1748,16 @@ class ASC(Alternating):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(a * dp)
-            dt.from_vector_inplace(dt.as_vector() + (1 - a) * dp)
+            dt.from_vector_inplace(dt.as_vector() + (1-a) * dp)
             self.transform.from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1827,10 +1835,10 @@ class ABC(Alternating):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e))
@@ -1897,10 +1905,10 @@ class BIC(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
@@ -1975,10 +1983,10 @@ class BICN(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e_po))
@@ -2041,10 +2049,10 @@ class BFC(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
@@ -2114,10 +2122,10 @@ class BFCN(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(e_po))
@@ -2186,10 +2194,10 @@ class BSC(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
@@ -2262,10 +2270,10 @@ class BBC(Bayesian):
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
-            error = np.abs(np.linalg.norm(
-                target.points - self.transform.target.points))
-            if error < self.eps:
-                break
+            # error = np.abs(np.linalg.norm(
+            #     target.points - self.transform.target.points))
+            # if error < self.eps:
+            #     break
 
             # save cost
             cost.append(e.T.dot(self.project_out(e[..., None])[..., 0]))
