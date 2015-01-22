@@ -7,9 +7,8 @@ from menpo.shape import PointCloud
 from menpo.transform import Scale, Translation, GeneralizedProcrustesAnalysis
 from menpo.model import PCAModel
 from menpo.shape import mean_pointcloud
+from menpo.image import Image
 from menpo.visualize import print_dynamic, progress_bar_str
-
-from menpofast.utils import build_parts_image, convert_from_menpo
 
 from menpofit.transform import (DifferentiablePiecewiseAffine,
                                 DifferentiableThinPlateSplines)
@@ -480,8 +479,8 @@ class PartsAAMBuilder(AAMBuilder):
                     level_str,
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
-            parts_image = build_parts_image(
-                i, s, self.parts_shape, normalize_parts=self.normalize_parts)
+            parts_image = Image(i.extract_patches(s, self.parts_shape,
+                                                  as_single_array=True))
             parts_images.append(parts_image)
 
         return parts_images

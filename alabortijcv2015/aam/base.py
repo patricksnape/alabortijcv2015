@@ -2,14 +2,13 @@ from __future__ import division
 import abc
 import numpy as np
 
-from serializablecallable import SerializableCallable
+# from serializablecallable import SerializableCallable
 
 from menpo.shape import TriMesh
 from menpo.transform import Translation
+from menpo.image import MaskedImage
 
 from menpofit.transform import DifferentiableThinPlateSplines
-
-from menpofast.image import MaskedImage
 
 
 # Abstract Interface for AAM Objects ------------------------------------------
@@ -18,18 +17,18 @@ class AAM(object):
 
     __metaclass__ = abc.ABCMeta
 
-    def __getstate__(self):
-        import menpofast.feature as menpofast_feature
-        d = self.__dict__.copy()
-
-        features = d.pop('features')
-        d['features'] = SerializableCallable(features, [menpofast_feature])
-
-        return d
-
-    def __setstate__(self, state):
-        state['features'] = state['features'].callable
-        self.__dict__.update(state)
+    # def __getstate__(self):
+    #     import menpofast.feature as menpofast_feature
+    #     d = self.__dict__.copy()
+    #
+    #     features = d.pop('features')
+    #     d['features'] = SerializableCallable(features, [menpofast_feature])
+    #
+    #     return d
+    #
+    # def __setstate__(self, state):
+    #     state['features'] = state['features'].callable
+    #     self.__dict__.update(state)
 
     @property
     def n_levels(self):

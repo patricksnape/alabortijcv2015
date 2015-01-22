@@ -4,9 +4,8 @@ import abc
 import numpy as np
 import scipy
 
-from menpofast.image import Image
-from menpofast.feature import gradient as fast_gradient
-from menpofast.utils import build_parts_image
+from menpo.image import Image
+from menpo.feature import gradient as fast_gradient
 
 from .result import AAMAlgorithmResult, LinearAAMAlgorithmResult
 
@@ -82,9 +81,9 @@ class StandardAAMInterface(AAMInterface):
                                   self.algorithm.transform)
 
     def gradient(self, image):
-        return image.gradient(
-            nullify_values_at_mask_boundaries=True).as_vector().reshape(
-                (2, image.n_channels, -1))
+        g = fast_gradient(image)
+        g.set_boundary_pixels()
+        return g.as_vector().reshape((2, image.n_channels, -1))
 
     def steepest_descent_images(self, gradient, dw_dp):
         # reshape gradient
@@ -133,7 +132,7 @@ class StandardAAMInterface(AAMInterface):
 
     def solve(self, h, j, e, prior):
         t = self.algorithm.transform
-        jp = t.jp()
+        jp = t.jp()[:h.shape[0], :h.shape[0]]
 
         if prior:
             inv_h = np.linalg.inv(h)
@@ -198,9 +197,10 @@ class PartsAAMInterface(AAMInterface):
         return np.rollaxis(self.algorithm.transform.d_dp(None), -1)
 
     def warp(self, image):
-        return build_parts_image(
-            image, self.algorithm.transform.target,
-            parts_shape=self.algorithm.appearance_model.parts_shape)
+        return image.extract_patches(
+            self.algorithm.transform.target,
+            parts_shape=self.algorithm.appearance_model.parts_shape,
+            as_single_array=True)
 
     def gradient(self, image):
         pixels = image.pixels
@@ -830,7 +830,7 @@ class SIC(Simultaneous):
         self._dw_dp = self.interface.dw_dp()
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
-            prior=False):
+            prior=False, fixed_p=None):
 
         # initialize cost
         cost = []
@@ -844,7 +844,7 @@ class SIC(Simultaneous):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in xrange(max_iters+1):
 
             # warp image
             i = self.interface.warp(image)
@@ -858,6 +858,8 @@ class SIC(Simultaneous):
                 # compute gauss-newton appearance parameters updates
                 masked_t = self.template.as_vector()[
                     self.interface.image_vec_mask]
+                if fixed_p:
+                    dp = dp[fixed_p]
                 dc = self._pinv_U.T.dot(masked_i - masked_t + j.dot(dp))
                 c += dc
 
@@ -869,11 +871,22 @@ class SIC(Simultaneous):
             # compute error image
             e = masked_m - masked_i
 
+            # compute and save cost
+            r = t[self.interface.image_vec_mask] - masked_i
+            r2 = self.appearance_model.reconstruct(i).as_vector() - \
+            i.as_vector()
+            cost.append(r.dot(r))
+
+            if _ == max_iters:
+                break
+
             # compute model gradient
             nabla_t = self.interface.gradient(self.template)
 
             # compute model jacobian
             j = self.interface.steepest_descent_images(nabla_t, self._dw_dp)
+            if fixed_p:
+                j = j[:, fixed_p]
             # project out appearance model from model jacobian
             j_po = self.project_out(j)
 
@@ -882,6 +895,10 @@ class SIC(Simultaneous):
 
             # compute gauss-newton parameter updates
             dp = self.interface.solve(h, j_po, e, prior)
+            if fixed_p:
+                dp_ = np.zeros_like(self.transform.as_vector())
+                dp_[fixed_p] = dp
+                dp = dp_
 
             # update transform
             target = self.transform.target
@@ -893,9 +910,6 @@ class SIC(Simultaneous):
             #     target.points - self.transform.target.points))
             # if error < self.eps:
             #     break
-
-            # save cost
-            cost.append(e.T.dot(e))
 
         # return aam algorithm result
         return self.interface.algorithm_result(

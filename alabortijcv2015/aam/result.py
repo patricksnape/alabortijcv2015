@@ -18,8 +18,11 @@ class AAMAlgorithmResult(AlgorithmResult):
         self.appearance_parameters = appearance_parameters
         self._gt_shape = gt_shape
 
-    def costs(self):
-        return list(self._costs / self._costs[0])
+    def costs(self, normalize=False):
+        costs = self._costs
+        if normalize:
+            costs /= self._costs[0]
+        return list(costs)
 
     @property
     def final_cost(self):
