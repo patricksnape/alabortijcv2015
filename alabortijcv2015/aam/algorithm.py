@@ -40,7 +40,12 @@ class AAMInterface(object):
         pass
 
     @abc.abstractmethod
-    def solve(self, h, j, e, prior):
+    def solve(self, h, j, e, prior, fixed_p):
+        pass
+
+    @abc.abstractmethod
+    def algorithm_result(self, image, shape_parameters,
+                         appearance_parameters=None, gt_shape=None):
         pass
 
 
@@ -49,90 +54,93 @@ class StandardAAMInterface(AAMInterface):
     def __init__(self, aam_algorithm, sampling_step=None):
         super(StandardAAMInterface, self). __init__(aam_algorithm)
 
-        n_true_pixels = self.algorithm.template.n_true_pixels()
-        n_channels = self.algorithm.template.n_channels
-        n_parameters = self.algorithm.transform.n_parameters
-        sampling_mask = np.require(np.zeros(n_true_pixels), dtype=np.bool)
+        self.template = self.algorithm.template
+        n_true_pixels = self.template.n_true_pixels()
+        self.n_channels = self.template.n_channels
+
+        self.transform = self.algorithm.transform
+        self.n_params = self.transform.n_parameters
+        self.n_dims = self.transform.n_dims
+        self.algorithm.noise_variance = \
+            self.transform.pdm.model.noise_variance()
 
         if sampling_step is None:
             sampling_step = 1
+        sampling_mask = np.zeros(n_true_pixels, dtype=np.bool)
         sampling_pattern = xrange(0, n_true_pixels, sampling_step)
         sampling_mask[sampling_pattern] = 1
-
-        self.image_vec_mask = np.nonzero(np.tile(
-            sampling_mask[None, ...], (n_channels, 1)).flatten())[0]
+        self.i_mask = np.nonzero(np.tile(
+            sampling_mask[None, ...], (self.n_channels, 1)).flatten())[0]
         self.dw_dp_mask = np.nonzero(np.tile(
-            sampling_mask[None, ..., None], (2, 1, n_parameters)))
-        self.gradient_mask = np.nonzero(np.tile(
-            sampling_mask[None, None, ...], (2, n_channels, 1)))
-        self.gradient2_mask = np.nonzero(np.tile(
-            sampling_mask[None, None, None, ...], (2, 2, n_channels, 1)))
-
-        # self.eigenvalues = self.algorithm.transform.pdm.model.eigenvalues
+            sampling_mask[None, ..., None], (2, 1, self.n_params)))
+        self.g_mask = np.nonzero(np.tile(
+            sampling_mask[None, None, ...], (2, self.n_channels, 1)))
+        self.g2_mask = np.nonzero(np.tile(
+            sampling_mask[None, None, None, ...], (2, 2, self.n_channels, 1)))
 
     def dw_dp(self):
-        dw_dp = np.rollaxis(self.algorithm.transform.d_dp(
-            self.algorithm.template.mask.true_indices()), -1)
-        return dw_dp[self.dw_dp_mask].reshape((dw_dp.shape[0], -1,
-                                               dw_dp.shape[2]))
+        dw_dp = self.transform.d_dp(self.template.mask.true_indices())
+        dw_dp = np.rollaxis(dw_dp, -1)[self.dw_dp_mask]
+        return dw_dp.reshape((self.n_dims, -1, self.n_params))
 
-    def warp(self, image):
-        return image.warp_to_mask(self.algorithm.template.mask,
-                                  self.algorithm.transform)
+    def warp(self, img):
+        return img.warp_to_mask(self.template.mask, self.transform)
 
     def gradient(self, image):
         g = fast_gradient(image)
         g.set_boundary_pixels()
-        return g.as_vector().reshape((2, image.n_channels, -1))
+        g = g.as_vector()
+        return g.reshape((self.n_dims, self.n_channels, -1))
 
-    def steepest_descent_images(self, gradient, dw_dp):
+    def steepest_descent_images(self, g, dw_dp):
         # reshape gradient
-        # gradient: n_dims x n_channels x n_pixels
-        gradient = gradient[self.gradient_mask].reshape(
-            gradient.shape[:2] + (-1,))
+        # g: n_dims x n_channels x n_pixels
+        g = g[self.g_mask]
+        g = g.reshape((self.n_dims, self.n_channels, -1))
+
         # compute steepest descent images
-        # gradient: n_dims x n_channels x n_pixels
-        # dw_dp:    n_dims x            x n_pixels x n_params
-        # sdi:               n_channels x n_pixels x n_params
+        # g:     n_dims x n_channels x n_pixels
+        # dw_dp: n_dims x            x n_pixels x n_params
+        # sdi:            n_channels x n_pixels x n_params
         sdi = 0
-        a = gradient[..., None] * dw_dp[:, None, ...]
+        a = g[..., None] * dw_dp[:, None, ...]
         for d in a:
             sdi += d
 
         # reshape steepest descent images
         # sdi: (n_channels x n_pixels) x n_params
-        return sdi.reshape((-1, sdi.shape[2]))
+        return sdi.reshape((-1, self.n_params))
 
-    def partial_newton_hessian(self, gradient2, dw_dp):
-        # reshape gradient
-        # gradient: n_dims x n_dims x n_channels x n_pixels
-        gradient2 = gradient2[self.gradient2_mask].reshape(
-            (2,) + gradient2.shape[:2] + (-1,))
+    def partial_newton_hessian(self, g2, dw_dp):
+        # reshape second order gradient
+        # g2: n_dims x n_dims x n_channels x n_pixels
+        g2 = g2[self.g2_mask]
+        g2 = g2.reshape((self.n_dims, self.n_dims, self.n_channels, -1))
 
         # compute partial hessian
-        # gradient: n_dims x n_dims x n_channels x n_pixels
-        # dw_dp:    n_dims x                     x n_pixels x n_params
-        # h:                 n_dims x n_channels x n_pixels x n_params
+        # g2:    n_dims x n_dims x n_channels x n_pixels
+        # dw_dp: n_dims x                     x n_pixels x n_params
+        # h1:             n_dims x n_channels x n_pixels x n_params
         h1 = 0
-        aux = gradient2[..., None] * dw_dp[:, None, None, ...]
+        aux = g2[..., None] * dw_dp[:, None, None, ...]
         for d in aux:
             h1 += d
         # compute partial hessian
-        # h:     n_dims x n_channels x n_pixels x n_params
-        # dw_dp: n_dims x            x n_pixels x          x n_params
-        # h:
+        # h1:     n_dims x n_channels x n_pixels x n_params
+        # dw_dp:  n_dims x            x n_pixels x          x n_params
+        # h2:              n_channels x n_pixels x n_params x n_params
         h2 = 0
         aux = h1[..., None] * dw_dp[..., None, :, None, :]
         for d in aux:
             h2 += d
 
         # reshape hessian
-        # 2:  (n_channels x n_pixels) x n_params x n_params
-        return h2.reshape((-1, h2.shape[3] * h2.shape[4]))
+        # h2:  (n_channels x n_pixels) x (n_params x n_params)
+        return h2.reshape((-1, self.n_params**2))
 
-    def solve(self, h, j, e, prior):
+    def solve(self, h, j, e, prior, fixed_p):
         t = self.algorithm.transform
-        jp = t.jp()[:h.shape[0], :h.shape[0]]
+        jp = np.asarray(t.jp()[fixed_p, fixed_p])
 
         if prior:
             inv_h = np.linalg.inv(h)
@@ -140,18 +148,22 @@ class StandardAAMInterface(AAMInterface):
             dp = -np.linalg.solve(t.h_prior + jp.dot(inv_h.dot(jp.T)),
                                   t.j_prior * t.as_vector() - jp.dot(dp))
         else:
-            dp = np.linalg.solve(h, j.T.dot(e))
-            if jp.shape[0] is dp.shape[0]:
+            if isinstance(h, np.ndarray):
+                dp = np.linalg.solve(h, j.T.dot(e))
+            else:
+                dp = j.T.dot(e) / h
+
+            if not isinstance(dp, np.ndarray) or jp.shape[0] is dp.shape[0]:
                 dp = jp.dot(dp)
             else:
                 dp = scipy.linalg.block_diag(jp, jp).dot(dp)
 
         return dp
 
-    def algorithm_result(self, image, shape_parameters, cost,
+    def algorithm_result(self, image, shape_parameters,
                          appearance_parameters=None, gt_shape=None):
         return AAMAlgorithmResult(
-            image, self.algorithm, shape_parameters, cost,
+            image, self.algorithm, shape_parameters,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -168,10 +180,10 @@ class LinearAAMInterface(StandardAAMInterface):
 
         return dp
 
-    def algorithm_result(self, image, shape_parameters, cost,
+    def algorithm_result(self, image, shape_parameters,
                          appearance_parameters=None, gt_shape=None):
         return LinearAAMAlgorithmResult(
-            image, self.algorithm, shape_parameters, cost,
+            image, self.algorithm, shape_parameters,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -266,10 +278,10 @@ class PartsAAMInterface(AAMInterface):
 
         return dp
 
-    def algorithm_result(self, image, shape_parameters, cost,
+    def algorithm_result(self, image, shape_parameters,
                          appearance_parameters=None, gt_shape=None):
         return AAMAlgorithmResult(
-            image, self.algorithm, shape_parameters, cost,
+            image, self.algorithm, shape_parameters,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
@@ -280,16 +292,17 @@ class AAMAlgorithm(object):
     __metaclass__ = abc.ABCMeta
 
     def __init__(self, aam_interface, appearance_model, transform,
-                 eps=10**-5, **kwargs):
+                 eps=None, **kwargs):
 
         # set common state for all AAM algorithms
         self.appearance_model = appearance_model
         self.template = appearance_model.mean()
         self.transform = transform
-        self.eps = eps
 
         # set interface
         self.interface = aam_interface(self, **kwargs)
+
+        self.eps = eps if eps else self.interface.noise_variance
 
         self._U = self.appearance_model.components.T
         self._pinv_U = np.linalg.pinv(
@@ -331,11 +344,8 @@ class Simultaneous(AAMAlgorithm):
         super(Simultaneous, self).__init__(
             aam_interface, appearance_model, transform, eps, **kwargs)
 
-        # set auxiliary template
-        self.template2 = self.template.copy()
-
         # set common state for all Fast Simultaneous AAM algorithms
-        self._masked_U = self._U[self.interface.image_vec_mask, :]
+        self._masked_U = self._U[self.interface.i_mask, :]
 
         # pre-compute
         self._precompute()
@@ -823,62 +833,60 @@ class SIC(Simultaneous):
     r"""
     Fast Simultaneous Inverse Compositional Gauss-Newton Algorithm
     """
+    def _residual(self, i, t):
+        return (i.as_vector()[self.interface.image_vec_mask] -
+                t.as_vector()[self.interface.image_vec_mask])
+
+    def _cost(self, r):
+        r_po = self.project_out(r)
+        return r.dot(r_po) / r.shape[0]
+
+    def _ls_function(self, r, j, dp):
+        lin_r = r - j.dot(dp)
+        return self._cost(lin_r)
 
     def _precompute(self):
-
         # compute warp jacobian
         self._dw_dp = self.interface.dw_dp()
+        # extract shape noise variance
+        self.noise_variance = self.interface.noise_variance()
+
+        # extract appearance model mean
+        self.m = self.appearance_model.mean().as_vector()
+        # masked appearance model mean
+        self.masked_m = self.m[self.interface.image_vec_mask]
 
     def run(self, image, initial_shape, gt_shape=None, max_iters=20,
             prior=False, fixed_p=None):
-
-        # initialize cost
-        cost = []
         # initialize transform
         self.transform.set_target(initial_shape)
-        shape_parameters = [self.transform.as_vector()]
-        # initial appearance parameters
-        appearance_parameters = [0]
-        # model mean
-        m = self.appearance_model.mean().as_vector()
-        # masked model mean
-        masked_m = m[self.interface.image_vec_mask]
+        # initial parameters lists
+        shape_params = [self.transform.as_vector()]
+        app_params = [0]
 
-        for _ in xrange(max_iters+1):
-
+        for n_iter in xrange(max_iters+1):
             # warp image
             i = self.interface.warp(image)
             # mask image
-            masked_i = i.as_vector()[self.interface.image_vec_mask]
+            masked_i = i.as_vector()[self.interface.i_mask]
 
-            if _ == 0:
+            if n_iter == 0:
                 # project image onto the model bases
-                c = self._pinv_U.T.dot(masked_i - masked_m)
+                c = self._pinv_U.T.dot(masked_i - self.masked_m)
             else:
                 # compute gauss-newton appearance parameters updates
                 masked_t = self.template.as_vector()[
                     self.interface.image_vec_mask]
-                if fixed_p:
-                    dp = dp[fixed_p]
                 dc = self._pinv_U.T.dot(masked_i - masked_t + j.dot(dp))
                 c += dc
 
             # reconstruct appearance
-            t = self._U.dot(c) + m
+            t = self._U.dot(c) + self.m
             self.template.from_vector_inplace(t)
-            appearance_parameters.append(c)
+            app_params.append(c)
 
             # compute error image
-            e = masked_m - masked_i
-
-            # compute and save cost
-            r = t[self.interface.image_vec_mask] - masked_i
-            r2 = self.appearance_model.reconstruct(i).as_vector() - \
-            i.as_vector()
-            cost.append(r.dot(r))
-
-            if _ == max_iters:
-                break
+            e = self.masked_m - masked_i
 
             # compute model gradient
             nabla_t = self.interface.gradient(self.template)
@@ -887,6 +895,7 @@ class SIC(Simultaneous):
             j = self.interface.steepest_descent_images(nabla_t, self._dw_dp)
             if fixed_p:
                 j = j[:, fixed_p]
+
             # project out appearance model from model jacobian
             j_po = self.project_out(j)
 
@@ -894,27 +903,29 @@ class SIC(Simultaneous):
             h = j_po.T.dot(j)
 
             # compute gauss-newton parameter updates
-            dp = self.interface.solve(h, j_po, e, prior)
-            if fixed_p:
-                dp_ = np.zeros_like(self.transform.as_vector())
-                dp_[fixed_p] = dp
-                dp = dp_
+            dp = self.interface.solve(h, j_po, e, prior, fixed_p)
 
             # update transform
+            if fixed_p:
+                delta_p = np.zeros(self.transform.n_parameters)
+                delta_p[fixed_p] = dp
+            else:
+                delta_p = dp
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
-            shape_parameters.append(self.transform.as_vector())
+            self.transform.from_vector_inplace(self.transform.as_vector() +
+                                               delta_p)
+            shape_params.append(self.transform.as_vector())
 
             # test convergence
-            # error = np.abs(np.linalg.norm(
-            #     target.points - self.transform.target.points))
-            # if error < self.eps:
-            #     break
+            shape_norm = np.sum((target.as_vector() -
+                                 self.transform.target.as_vector()
+                                 )**2) / target.n_parameters
+            if shape_norm < self.eps:
+                break
 
         # return aam algorithm result
         return self.interface.algorithm_result(
-            image, shape_parameters, cost,
-            appearance_parameters=appearance_parameters, gt_shape=gt_shape)
+            image, shape_params, app_params=app_params, gt_shape=gt_shape)
 
 
 class SICN(Simultaneous):

@@ -8,13 +8,14 @@ from alabortijcv2015.result import (AlgorithmResult, FitterResult,
 
 class AAMAlgorithmResult(AlgorithmResult):
 
-    def __init__(self, image, fitter, shape_parameters, costs,
+    def __init__(self, image, fitter, shape_parameters, costs, ,
                  appearance_parameters=None, gt_shape=None):
         super(AAMAlgorithmResult, self).__init__()
         self.image = image
         self.fitter = fitter
         self.shape_parameters = shape_parameters
         self._costs = costs
+        self.linearizations = linearizations
         self.appearance_parameters = appearance_parameters
         self._gt_shape = gt_shape
 
@@ -35,10 +36,10 @@ class AAMAlgorithmResult(AlgorithmResult):
 
 class LinearAAMAlgorithmResult(AAMAlgorithmResult):
 
-    def __init__(self, image, fitter, shape_parameters, cost,
+    def __init__(self, image, fitter, shape_parameters, cost, ls_approx,
                  appearance_parameters=None, gt_shape=None):
         super(LinearAAMAlgorithmResult, self).__init__(
-            image, fitter, shape_parameters, cost,
+            image, fitter, shape_parameters, cost, ls_approx,
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
     def shapes(self, as_points=False):
@@ -63,10 +64,17 @@ class LinearAAMAlgorithmResult(AAMAlgorithmResult):
 
 class AAMFitterResult(FitterResult):
 
-    def costs(self):
+    def linearizations(self):
+        linearizations = []
+        for j, alg in enumerate(self.algorithm_results):
+            linearizations.append(alg.linearizations)
+
+        return linearizations
+
+    def costs(self, normalize=False):
         costs = []
         for j, alg in enumerate(self.algorithm_results):
-            costs += alg.costs()
+            costs += alg.costs(normalize=normalize)
 
         return costs
 
