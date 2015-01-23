@@ -7,7 +7,6 @@ from menpo.transform import Scale
 from menpofit.fittingresult import compute_error
 
 from menpo.image import Image
-from menpofast.utils import convert_from_menpo
 
 
 # Abstract Interface for Results ----------------------------------------------
