@@ -22,6 +22,8 @@ from .base import build_reference_frame, build_patch_reference_frame
 
 class AAMBuilder(object):
 
+    __metaclass__ = abc.ABCMeta
+
     def build(self, images, group=None, label=None, verbose=False):
         # compute reference shape
         reference_shape = self._compute_reference_shape(images, group, label,
@@ -198,6 +200,116 @@ class AAMBuilder(object):
         pass
 
 
+class CombinedAAMBuilder(AAMBuilder):
+
+    __metaclass__ = abc.ABCMeta
+
+    def build(self, images, group=None, label=None, verbose=False):
+        # compute reference shape
+        reference_shape = self._compute_reference_shape(images, group, label,
+                                                        verbose)
+        # normalize images
+        images = self._normalize_images(images, group, label, reference_shape,
+                                        verbose)
+
+        # build models at each scale
+        if verbose:
+            print_dynamic('- Building models\n')
+        shape_models = []
+        appearance_models = []
+        combined_models = []
+        # for each pyramid level (high --> low)
+        for j, s in enumerate(self.scales):
+            if verbose:
+                if len(self.scales) > 1:
+                    level_str = '  - Level {}: '.format(j)
+                else:
+                    level_str = '  - '
+
+            # obtain image representation
+            if j == 0:
+                # compute features at highest level
+                feature_images = self._compute_features(images, level_str,
+                                                        verbose)
+                level_images = feature_images
+            elif self.scale_features:
+                # scale features at other levels
+                level_images = self._scale_images(feature_images, s,
+                                                  level_str, verbose)
+            else:
+                # scale images and compute features at other levels
+                scaled_images = self._scale_images(images, s, level_str,
+                                                   verbose)
+                level_images = self._compute_features(scaled_images,
+                                                      level_str, verbose)
+
+            # extract potentially rescaled shapes ath highest level
+            level_shapes = [i.landmarks[group][label]
+                            for i in level_images]
+
+            # obtain shape representation
+            if j == 0 or self.scale_shapes:
+                # obtain shape model
+                if verbose:
+                    print_dynamic('{}Building shape model'.format(level_str))
+                shape_model = self._build_shape_model(
+                    level_shapes, self.max_shape_components)
+                # add shape model to the list
+                shape_models.append(shape_model)
+            else:
+                # copy precious shape model and add it to the list
+                shape_models.append(deepcopy(shape_model))
+
+            # obtain warped images
+            warped_images = self._warp_images(level_images, level_shapes,
+                                              shape_model.mean(), level_str,
+                                              verbose)
+
+            # obtain appearance model
+            if verbose:
+                print_dynamic('{}Building appearance model'.format(level_str))
+            appearance_model = PCAModel(warped_images)
+            # trim appearance model if required
+            if self.max_appearance_components is not None:
+                appearance_model.trim_components(
+                    self.max_appearance_components)
+            # add appearance model to the list
+            appearance_models.append(appearance_model)
+
+            # combine shape and appearance parameters
+            combined_params = [PointCloud(np.hstack((shape_model.project(s),
+                                                     appearance_model.project(i)))
+                               [..., None])
+                               for (i, s) in zip(warped_images, level_shapes)]
+
+            # obtain combined model
+            if verbose:
+                print_dynamic('{}Building appearance model'.format(level_str))
+            combined_model = PCAModel(combined_params)
+            # trim appearance model if required
+            if self.max_combined_components is not None:
+                combined_model.trim_components(
+                    self.max_combined_components)
+
+            # add appearance model to the list
+            combined_models.append(combined_model)
+
+            if verbose:
+                print_dynamic('{}Done\n'.format(level_str))
+
+        # reverse the list of shape and appearance models so that they are
+        # ordered from lower to higher resolution
+        shape_models.reverse()
+        appearance_models.reverse()
+        combined_models.reverse()
+        self.scales.reverse()
+
+        aam = self._build_aam(shape_models, appearance_models,
+                              combined_models, reference_shape)
+
+        return aam
+
+
 # Concrete Implementations of AAM Builders ------------------------------------
 
 class GlobalAAMBuilder(AAMBuilder):
@@ -248,6 +360,31 @@ class GlobalAAMBuilder(AAMBuilder):
         return GlobalAAM(shape_models, appearance_models, reference_shape,
                          self.transform, self.features, self.sigma,
                          self.scales, self.scale_shapes, self.scale_features)
+
+
+class CombinedGlobalAAMBuilder(CombinedAAMBuilder, GlobalAAMBuilder):
+
+    def __init__(self, features=None, transform=DifferentiablePiecewiseAffine,
+                 trilist=None, diagonal=None, sigma=None, scales=(1, .5),
+                 scale_shapes=True, scale_features=True,
+                 max_shape_components=None, max_appearance_components=None,
+                 max_combined_components=None, boundary=3):
+        super(CombinedGlobalAAMBuilder, self).__init__(
+            features=features, transform=transform, trilist=trilist,
+            diagonal=diagonal, sigma=sigma, scales=scales,
+            scale_shapes=scale_shapes, scale_features=scale_features,
+            max_shape_components=max_shape_components,
+            max_appearance_components=max_appearance_components,
+            boundary=boundary)
+        self.max_combined_components = max_combined_components
+
+    def _build_aam(self, shape_models, appearance_models,
+                   combine_model, reference_shape):
+        return CombinedGlobalAAM(shape_models, appearance_models,
+                                 combine_model, reference_shape,
+                                 self.transform, self.features, self.sigma,
+                                 self.scales, self.scale_shapes,
+                                 self.scale_features)
 
 
 class PatchAAMBuilder(AAMBuilder):
@@ -479,8 +616,8 @@ class PartsAAMBuilder(AAMBuilder):
                     level_str,
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
-            parts_image = Image(i.extract_patches(s, self.parts_shape,
-                                                  as_single_array=True))
+            parts_image = Image(i.extract_patches(
+                s, patch_size=self.parts_shape, as_single_array=True))
             parts_images.append(parts_image)
 
         return parts_images
@@ -492,7 +629,7 @@ class PartsAAMBuilder(AAMBuilder):
                         self.scale_shapes, self.scale_features)
 
 
-from .base import (GlobalAAM, PatchAAM,
+from .base import (GlobalAAM, CombinedGlobalAAM, PatchAAM,
                    LinearGlobalAAM, LinearPatchAAM,
                    PartsAAM)
 

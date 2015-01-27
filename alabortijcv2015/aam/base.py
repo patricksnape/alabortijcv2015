@@ -17,19 +17,6 @@ class AAM(object):
 
     __metaclass__ = abc.ABCMeta
 
-    # def __getstate__(self):
-    #     import menpofast.feature as menpofast_feature
-    #     d = self.__dict__.copy()
-    #
-    #     features = d.pop('features')
-    #     d['features'] = SerializableCallable(features, [menpofast_feature])
-    #
-    #     return d
-    #
-    # def __setstate__(self, state):
-    #     state['features'] = state['features'].callable
-    #     self.__dict__.update(state)
-
     @property
     def n_levels(self):
         """
@@ -102,12 +89,11 @@ class AAM(object):
         # TODO: this bit of logic should to be transferred down to PCAModel
         shape_weights = (np.random.randn(sm.n_active_components) *
                          sm.eigenvalues[:sm.n_active_components]**0.5)
-        shape_instance = sm.instance(shape_weights)
         appearance_weights = (np.random.randn(am.n_active_components) *
                               am.eigenvalues[:am.n_active_components]**0.5)
-        appearance_instance = am.instance(appearance_weights)
-
-        return self._instance(level, shape_instance, appearance_instance)
+        return self.instance(shape_weights=shape_weights,
+                             appearance_weights=appearance_weights,
+                             level=level)
 
 
 # Concrete Implementations of AAM Objects -------------------------------------
@@ -149,6 +135,72 @@ class GlobalAAM(AAM):
         else:
             trilist = None
         return build_reference_frame(reference_shape, trilist=trilist)
+
+
+class CombinedGlobalAAM(GlobalAAM):
+
+    def __init__(self, shape_models, appearance_models, combined_models,
+                 reference_shape, transform, features, sigma, scales,
+                 scale_shapes, scale_features):
+        super(CombinedGlobalAAM, self).__init__(
+            shape_models, appearance_models, reference_shape, transform,
+            features, sigma, scales, scale_shapes, scale_features)
+        self.combined_models = combined_models
+
+    def instance(self, combined_weights=None, level=-1):
+        r"""
+        Generates a novel AAM instance given a set of combined
+        shape and appearance weights. If no weights are provided, the mean
+        AAM instance is returned.
+
+        Parameters
+        -----------
+        weights : ``(n_weights,)`` `ndarray` or `float` list
+            Weights of the combined model that will be used to create
+            novel shape and appearance instance. If ``None``,
+            ``(combined_weights = [0, 0, ..., 0])`` is used.
+
+        level : `int`, optional
+            The pyramidal level to be used.
+
+        Returns
+        -------
+        image : :map:`Image`
+            The novel AAM instance.
+        """
+        cm = self.combined_models[level]
+
+        if combined_weights is None:
+            combined_weights = [0]
+        combined_instance = cm.instance(combined_weights)
+
+        sm = self.shape_models[level]
+        combined_vector = combined_instance.as_vector().copy()
+        shape_weights = combined_vector[:sm.n_active_components]
+        appearance_weights = combined_vector[sm.n_active_components:]
+
+        return super(CombinedGlobalAAM, self).instance(
+            shape_weights=shape_weights,
+            appearance_weights=appearance_weights,
+            level=level)
+
+    def random_instance(self, level=-1):
+        r"""
+        Generates a novel random instance of the AAM.
+
+        Parameters
+        -----------
+        level : `int`, optional
+            The pyramidal level to be used.
+
+        Returns
+        -------
+        image : :map:`Image`
+            The novel AAM instance.
+        """
+        cm = self.combined_models[level]
+        combined_weights = np.random.randn(cm.n_active_components)
+        return self.instance(combined_weights=combined_weights, level=level)
 
 
 class PatchAAM(AAM):

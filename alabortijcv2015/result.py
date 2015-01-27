@@ -183,31 +183,31 @@ class AlgorithmResult(Result):
         Generates a list containing the transforms obtained at each fitting
         iteration.
         """
-        return [self.fitter.transform.from_vector(p)
-                for p in self.shape_parameters]
+        return [self.algorithm.transform.from_vector(p)
+                for p in self.shape_params]
 
     @property
     def final_transform(self):
         r"""
         Returns the final transform.
         """
-        return self.fitter.transform.from_vector(self.shape_parameters[-1])
+        return self.algorithm.transform.from_vector(self.shape_params[-1])
 
     @property
     def initial_transform(self):
         r"""
         Returns the initial transform from which the fitting started.
         """
-        return self.fitter.transform.from_vector(self.shape_parameters[0])
+        return self.algorithm.transform.from_vector(self.shape_params[0])
 
     def shapes(self, as_points=False):
         if as_points:
-            return [self.fitter.transform.from_vector(p).target.points
-                    for p in self.shape_parameters]
+            return [self.algorithm.transform.from_vector(p).target.points
+                    for p in self.shape_params]
 
         else:
-            return [self.fitter.transform.from_vector(p).target
-                    for p in self.shape_parameters]
+            return [self.algorithm.transform.from_vector(p).target
+                    for p in self.shape_params]
 
     @property
     def final_shape(self):
@@ -234,7 +234,7 @@ class FitterResult(Result):
     @property
     def n_levels(self):
         r"""
-        The number of levels of the fitter object.
+        The number of levels of the algorithm object.
 
         :type: `int`
         """
@@ -247,7 +247,7 @@ class FitterResult(Result):
     @property
     def n_iters(self):
         r"""
-        The total number of iterations used to fitter the image.
+        The total number of iterations used to algorithm the image.
 
         :type: `int`
         """
@@ -338,4 +338,3 @@ class SerializableResult(Result):
             self._image = image
 
         return self._image
-

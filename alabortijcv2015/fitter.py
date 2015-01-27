@@ -86,7 +86,7 @@ class Fitter(object):
     def fit(self, image, initial_shape, max_iters=50, gt_shape=None,
             **kwargs):
         r"""
-        Fits the multilevel fitter to an image.
+        Fits the multilevel algorithm to an image.
 
         Parameters
         -----------
@@ -270,7 +270,7 @@ class Fitter(object):
     def _fit(self, images, initial_shape, gt_shapes=None, max_iters=50,
              **kwargs):
         r"""
-        Fits the fitter to the multilevel pyramidal images.
+        Fits the algorithm to the multilevel pyramidal images.
 
         Parameters
         -----------
