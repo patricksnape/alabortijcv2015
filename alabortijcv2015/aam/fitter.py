@@ -5,7 +5,7 @@ from alabortijcv2015.pdm import OrthoPDM
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
 
 from .algorithm import (StandardAAMInterface, LinearAAMInterface,
-                        PartsAAMInterface, AIC, CIC)
+                        PartsAAMInterface, AIC)
 from .result import AAMFitterResult
 
 
@@ -108,49 +108,5 @@ class PartsAAMFitter(AAMFitter):
             am.parts_shape = self.dm.parts_shape
             am.normalize_parts = self.dm.normalize_parts
             algorithm = algorithm_cls(PartsAAMInterface, am, pdm, **kwargs)
-
-            self._algorithms.append(algorithm)
-
-
-# -----------------------------------------------------------------------------
-
-class CombinedGlobalAAMFitter(AAMFitter):
-
-    def _check_n_combined(self, n_combined):
-        if n_combined is not None:
-            if type(n_combined) is int or type(n_combined) is float:
-                for cm in self.dm.combined_models:
-                    cm.n_active_components = n_combined
-            elif len(n_combined) == 1 and self.dm.n_levels > 1:
-                for cm in self.dm.combined_models:
-                    cm.n_active_components = n_combined[0]
-            elif len(n_combined) == self.dm.n_levels:
-                for cm, n in zip(self.dm.combined_models, n_combined):
-                    cm.n_active_components = n
-            else:
-                raise ValueError('n_combined can be an integer or a float '
-                                 'or None or a list containing 1 or {} of '
-                                 'those'.format(self.dm.n_levels))
-
-    def __init__(self, global_aam, algorithm_cls=CIC,
-                 n_combined=None, **kwargs):
-
-        super(CombinedGlobalAAMFitter, self).__init__()
-
-        self.dm = global_aam
-        self._algorithms = []
-        self._check_n_combined(n_combined)
-
-        for j, (am, sm, cm) in enumerate(zip(self.dm.appearance_models,
-                                             self.dm.shape_models,
-                                             self.dm.combined_models)):
-
-            md_transform = OrthoMDTransform(
-                sm, self.dm.transform,
-                source=am.mean().landmarks['source'].lms,
-                sigma2=am.noise_variance())
-
-            algorithm = algorithm_cls(StandardAAMInterface, am,
-                                      md_transform, cm, **kwargs)
 
             self._algorithms.append(algorithm)
