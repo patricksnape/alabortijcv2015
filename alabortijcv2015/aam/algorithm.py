@@ -197,10 +197,10 @@ class PartsAAMInterface(AAMInterface):
         return np.rollaxis(self.algorithm.transform.d_dp(None), -1)
 
     def warp(self, image):
-        return image.extract_patches(
+        return Image(image.extract_patches(
             self.algorithm.transform.target,
-            parts_shape=self.algorithm.appearance_model.parts_shape,
-            as_single_array=True)
+            patch_size=self.algorithm.appearance_model.parts_shape,
+            as_single_array=True))
 
     def gradient(self, image):
         pixels = image.pixels

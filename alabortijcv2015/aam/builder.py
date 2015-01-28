@@ -479,8 +479,8 @@ class PartsAAMBuilder(AAMBuilder):
                     level_str,
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
-            parts_image = Image(i.extract_patches(s, self.parts_shape,
-                                                  as_single_array=True))
+            parts_image = Image(i.extract_patches(
+                s, patch_size=self.parts_shape, as_single_array=True))
             parts_images.append(parts_image)
 
         return parts_images
