@@ -792,7 +792,7 @@ class PBC(ProjectOut):
             # compute hessian
             h = j_po.T.dot(j)
 
-             # compute symmetric esm parameter updates
+            # compute symmetric esm parameter updates
             dp = self.interface.solve(h, j_po, e, prior)
 
             # update transform
