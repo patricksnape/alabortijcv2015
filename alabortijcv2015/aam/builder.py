@@ -18,10 +18,151 @@ from alabortijcv2015.utils import fsmooth
 from .base import build_reference_frame, build_patch_reference_frame
 
 
+def scale_shape_to_diagonal(shape, diagonal):
+    x, y = shape.range()
+    scale = diagonal / np.sqrt(x**2 + y**2)
+    return Scale(scale, shape.n_dims).apply(shape)
+
+def normalize_image_scale(image, reference_shape,
+                          group=None, label=None, smoothing_sigma=None):
+    rescaled_image = image.rescale_to_reference_shape(reference_shape,
+                                                      group=group, label=label)
+    if smoothing_sigma:
+        rescaled_image.pixels = fsmooth(rescaled_image.pixels, smoothing_sigma)
+    return image
+
 # Abstract Interface for AAM Builders -----------------------------------------
+def _compute_reference_shape(images, group, label, diagonal, verbose):
+    # the reference_shape is the mean shape of the images' landmarks
+    if verbose:
+        print_dynamic('- Computing reference shape')
+    shapes = [i.landmarks[group][label] for i in images]
+    ref_shape = mean_pointcloud(shapes)
+    # fix the reference_shape's diagonal length if specified
+    if diagonal:
+        ref_shape = scale_shape_to_diagonal(ref_shape, diagonal)
+    return ref_shape
+
+
+def _normalize_images(images, group, label, ref_shape, sigma, verbose):
+    # normalize the scaling of all images wrt the reference_shape size
+    norm_images = []
+    for c, i in enumerate(images):
+        if verbose:
+            print_dynamic('- Normalizing images size: {}'.format(
+                progress_bar_str((c + 1.) / len(images), show_bar=False)))
+        i = i.rescale_to_reference_shape(ref_shape, group=group,
+                                         label=label)
+        if sigma:
+            i.pixels = fsmooth(i.pixels, sigma)
+        norm_images.append(i)
+    return norm_images
+
+
+def _compute_features(features, images, level_str, verbose):
+    feature_images = []
+    for c, i in enumerate(images):
+        if verbose:
+            print_dynamic(
+                '{}Computing feature space: {}'.format(
+                    level_str, progress_bar_str((c + 1.) / len(images),
+                                                show_bar=False)))
+        if features:
+            i = features(i)
+        feature_images.append(i)
+
+    return feature_images
+
+
+def _scale_images(images, s, level_str, verbose):
+    scaled_images = []
+    for c, i in enumerate(images):
+        if verbose:
+            print_dynamic(
+                '{}Scaling features: {}'.format(
+                    level_str, progress_bar_str((c + 1.) / len(images),
+                                                show_bar=False)))
+        scaled_images.append(i.rescale(s))
+    return scaled_images
+
+
+def _build_shape_model(cls, shapes, max_components):
+    r"""
+    Builds a shape model given a set of shapes.
+
+    Parameters
+    ----------
+    shapes: list of :map:`PointCloud`
+        The set of shapes from which to build the model.
+    max_components: None or int or float
+        Specifies the number of components of the trained shape model.
+        If int, it specifies the exact number of components to be retained.
+        If float, it specifies the percentage of variance to be retained.
+        If None, all the available components are kept (100% of variance).
+
+    Returns
+    -------
+    shape_model: :class:`menpo.model.pca`
+        The PCA shape model.
+    """
+
+    # centralize shapes
+    centered_shapes = [Translation(-s.centre()).apply(s) for s in shapes]
+    # align centralized shape using Procrustes Analysis
+    gpa = GeneralizedProcrustesAnalysis(centered_shapes)
+    aligned_shapes = [s.aligned_source() for s in gpa.transforms]
+    # build shape model
+    shape_model = PCAModel(aligned_shapes)
+    if max_components is not None:
+        # trim shape model if required
+        shape_model.trim_components(max_components)
+
+    return shape_model
+
+
+def feature_then_scale(image, feature, scales):
+    feature_image = feature(image)
+    for s in scales:
+        yield feature_image.rescale(s)
+
+
+def scale_then_feature(image, feature, scales):
+    for s in scales:
+        yield feature(image.rescale(s))
+
+
+def build_appearance_model(images, reference_shape, diagonal=None,
+                           normalization_sigma=None, scale_features=True,
+                           group=None, label=None):
+    if diagonal is not None:
+        reference_shape = scale_shape_to_diagonal(reference_shape, diagonal)
+
+    for image in images:
+        norm_image = normalize_image_scale(image, reference_shape,
+                                           group=group, label=label,
+                                           smoothing_sigma=normalization_sigma)
+        if scale_features:
+            norm_image = features[(norm_image)
+        for scale in downscale_image(image, smooth):
+
+
+    if first_iteration:
+        feature_image = features(image)
+    elif scale_features:
+        scaled_image = image.rescale(feature_image)
+    else:
+        scaled_image = image.rescale(image)
+        feature_image = features(scaled_image)
+
+#for image in images:
+#   normalize image
+#   feature?
+#   for scale in scales:
+#       features?
+#       warp
+#       PCA
 
 class AAMBuilder(object):
-
     def build(self, images, group=None, label=None, verbose=False):
         # compute reference shape
         reference_shape = self._compute_reference_shape(images, group, label,
@@ -106,92 +247,6 @@ class AAMBuilder(object):
 
         return aam
 
-    def _compute_reference_shape(self, images, group, label, verbose):
-        # the reference_shape is the mean shape of the images' landmarks
-        if verbose:
-            print_dynamic('- Computing reference shape')
-        shapes = [i.landmarks[group][label] for i in images]
-        ref_shape = mean_pointcloud(shapes)
-        # fix the reference_shape's diagonal length if specified
-        if self.diagonal:
-            x, y = ref_shape.range()
-            scale = self.diagonal / np.sqrt(x**2 + y**2)
-            Scale(scale, ref_shape.n_dims).apply_inplace(ref_shape)
-        return ref_shape
-
-    def _normalize_images(self, images, group, label, ref_shape, verbose):
-        # normalize the scaling of all images wrt the reference_shape size
-        norm_images = []
-        for c, i in enumerate(images):
-            if verbose:
-                print_dynamic('- Normalizing images size: {}'.format(
-                    progress_bar_str((c + 1.) / len(images), show_bar=False)))
-            i = i.rescale_to_reference_shape(ref_shape, group=group,
-                                             label=label)
-            if self.sigma:
-                i.pixels = fsmooth(i.pixels, self.sigma)
-            norm_images.append(i)
-        return norm_images
-
-    def _compute_features(self, images, level_str, verbose):
-        feature_images = []
-        for c, i in enumerate(images):
-            if verbose:
-                print_dynamic(
-                    '{}Computing feature space: {}'.format(
-                        level_str, progress_bar_str((c + 1.) / len(images),
-                                                    show_bar=False)))
-            if self.features:
-                i = self.features(i)
-            feature_images.append(i)
-
-        return feature_images
-
-    @classmethod
-    def _scale_images(cls, images, s, level_str, verbose):
-        scaled_images = []
-        for c, i in enumerate(images):
-            if verbose:
-                print_dynamic(
-                    '{}Scaling features: {}'.format(
-                        level_str, progress_bar_str((c + 1.) / len(images),
-                                                    show_bar=False)))
-            scaled_images.append(i.rescale(s))
-        return scaled_images
-
-    @classmethod
-    def _build_shape_model(cls, shapes, max_components):
-        r"""
-        Builds a shape model given a set of shapes.
-
-        Parameters
-        ----------
-        shapes: list of :map:`PointCloud`
-            The set of shapes from which to build the model.
-        max_components: None or int or float
-            Specifies the number of components of the trained shape model.
-            If int, it specifies the exact number of components to be retained.
-            If float, it specifies the percentage of variance to be retained.
-            If None, all the available components are kept (100% of variance).
-
-        Returns
-        -------
-        shape_model: :class:`menpo.model.pca`
-            The PCA shape model.
-        """
-
-        # centralize shapes
-        centered_shapes = [Translation(-s.centre()).apply(s) for s in shapes]
-        # align centralized shape using Procrustes Analysis
-        gpa = GeneralizedProcrustesAnalysis(centered_shapes)
-        aligned_shapes = [s.aligned_source() for s in gpa.transforms]
-        # build shape model
-        shape_model = PCAModel(aligned_shapes)
-        if max_components is not None:
-            # trim shape model if required
-            shape_model.trim_components(max_components)
-
-        return shape_model
 
     @abc.abstractmethod
     def _build_aam(self, shape_models, appearance_models, reference_shape):
