@@ -1,10 +1,13 @@
 from __future__ import division
 import abc
 from copy import deepcopy
+import collections
+import itertools
 import numpy as np
 
 from menpo.shape import PointCloud
 from menpo.transform import Scale, Translation, GeneralizedProcrustesAnalysis
+from menpo.feature import no_op
 from menpo.model import PCAModel
 from menpo.shape import mean_pointcloud
 from menpo.image import Image
@@ -86,7 +89,7 @@ def _scale_images(images, s, level_str, verbose):
     return scaled_images
 
 
-def _build_shape_model(cls, shapes, max_components):
+def build_shape_model(shapes, max_components=None):
     r"""
     Builds a shape model given a set of shapes.
 
@@ -105,14 +108,13 @@ def _build_shape_model(cls, shapes, max_components):
     shape_model: :class:`menpo.model.pca`
         The PCA shape model.
     """
-
     # centralize shapes
     centered_shapes = [Translation(-s.centre()).apply(s) for s in shapes]
     # align centralized shape using Procrustes Analysis
     gpa = GeneralizedProcrustesAnalysis(centered_shapes)
-    aligned_shapes = [s.aligned_source() for s in gpa.transforms]
+    aligned_shapes = (s.aligned_source() for s in gpa.transforms)
     # build shape model
-    shape_model = PCAModel(aligned_shapes)
+    shape_model = PCAModel(aligned_shapes, n_samples=gpa.n_sources)
     if max_components is not None:
         # trim shape model if required
         shape_model.trim_components(max_components)
@@ -120,47 +122,177 @@ def _build_shape_model(cls, shapes, max_components):
     return shape_model
 
 
-def feature_then_scale(image, feature, scales):
+def build_appearance_model(images, max_components=None):
+    app_model = PCAModel(images)
+    if max_components is not None:
+        # trim shape model if required
+        app_model.trim_components(max_components)
+    return app_model
+
+
+def feature_then_scale(image, feature, scales, sigmas):
     feature_image = feature(image)
     for s in scales:
         yield feature_image.rescale(s)
 
 
-def scale_then_feature(image, feature, scales):
-    for s in scales:
-        yield feature(image.rescale(s))
+def scale_then_features(image, features, scales):
+    if not isinstance(features, collections.Iterable):
+        features = [features] * len(scales)
+    for k, s in enumerate(scales):
+        yield features[k](image.rescale(s))
 
 
-def build_appearance_model(images, reference_shape, diagonal=None,
-                           normalization_sigma=None, scale_features=True,
-                           group=None, label=None):
+def pyramid_then_features(image, features, n_levels=3, downscale=2,
+                          gaussian=False):
+    if not isinstance(features, collections.Iterable):
+        features = [features] * n_levels
+    if gaussian:
+        image_pyramid = image.gaussian_pyramid(n_levels=n_levels,
+                                               downscale=downscale)
+    else:
+        image_pyramid = image.pyramid(n_levels=n_levels, downscale=downscale)
+
+    for k, level in enumerate(image_pyramid):
+        yield features[k](level)
+
+
+def feature_then_pyramid(image, feature, n_levels=3, downscale=2,
+                         gaussian=False):
+    feature_image = feature(image)
+
+    if gaussian:
+        fimage_pyramid = feature_image.gaussian_pyramid(n_levels=n_levels,
+                                                        downscale=downscale)
+    else:
+        fimage_pyramid = feature_image.pyramid(n_levels=n_levels,
+                                               downscale=downscale)
+
+    for level in fimage_pyramid:
+        yield level
+
+def reference_frame_warp(image, reference_frame, transform, group=None,
+                         label=None, ref_frame_group='source', boundary=3):
+    t = transform.set_target(image.landmarks[group][label])
+    warped_im = image.warp_to_mask(ref_im.mask, t)
+
+    # Attach reference frame landmarks to image
+    warped_im.landmarks[ref_frame_group] = ref_im.landmarks[ref_frame_group]
+    return warped_im
+
+
+def process_image_per_scale(image, reference_shape, diagonal=None,
+                            normalization_sigma=None,
+                            image_scaling_callable,
+                            features=no_op,
+                            image_warping_callable,
+                            group=None, label=None):
+    norm_image = normalize_image_scale(image, reference_shape,
+                                       group=group, label=label,
+                                       smoothing_sigma=normalization_sigma)
+
+    scale_imgs = []
+    for k, scale_image in enumerate(image_scaling_callable(norm_image, features)):
+        ref_frame = build_reference_frame(reference_shape,
+                                          boundary=boundary,
+                                          group='source')
+        scale_imgs.append(image_warping_callable(scale_image,
+                                                 ref_frame))
+    return scale_imgs
+
+def batch(iterable, n):
+    it = iter(iterable)
+    while True:
+        chunk = tuple(itertools.islice(it, n))
+        if not chunk:
+            return
+        yield chunk
+
+def build_batch_aam(images, batch_size=None, reference_shape=None):
+    if batch_size is None:
+        batch_size = len(images)
+
+    provided_ref_shape = reference_shape is not None
+    # Break the images into a set of batches (this can handle infinite
+    # generators and will only yield batch_size at a time)
+    image_batches = batch(images, batch_size)
+
+    first_image_batch = next(image_batches)
+
+    app_models = []
+    shape_models = []
+
+    next_reference_shape = reference_shape if provided_ref_shape else None
+
+    # Consume the rest of the batches
+    for image_batch in image_batches:
+        app_models, shape_models = build_appearance_and_shape_models(image_batch,
+                                                                     reference_shape=next_reference_shape,
+                                                                     app_models=app_models,
+                                                                     shape_models=shape_models)
+        if not provided_ref_shape:
+            next_reference_shape = shape_models[-1].mean()
+
+# compute transforms
+ref_lmark_group = 'source'
+ref_im =
+
+def build_appearance_and_shape_models(images, group=None, label=None,
+                                      diagonal=None, reference_shape=None,
+                                      app_models=None, shape_models=None):
+    exist_app_model = app_models is not None
+    exist_shape_model = shape_models is not None
+
+    if not exist_app_model:
+        app_models = []
+    else:
+        app_models.reverse()
+    if not exist_shape_model:
+        shape_models = []
+    else:
+        shape_models.reverse()
+
+    # Use the mean as the reference shape if none is passed. This is the most
+    # mathematically correct behaviour if you have all the images in memory
+    # at training time.
+    if reference_shape is None:
+        reference_shape = mean_pointcloud((i.landmarks[group][label]
+                                           for i in images))
+
+    # Scale the reference shape to a given diagonal. Since the reference frame
+    # (the mask each image is warped into for correspondance), is directly
+    # related to the reference shape size, this scaling will affect how many
+    # pixels are in the top level of the appearance model.
     if diagonal is not None:
         reference_shape = scale_shape_to_diagonal(reference_shape, diagonal)
 
+    # Process every image and every scale
+    top_lvl_ref_frame =
+    reference_frames = process_image_per_scale(top_lvl_ref_frame, )
     for image in images:
-        norm_image = normalize_image_scale(image, reference_shape,
-                                           group=group, label=label,
-                                           smoothing_sigma=normalization_sigma)
-        if scale_features:
-            norm_image = features[(norm_image)
-        for scale in downscale_image(image, smooth):
+        # This processing applies a data pipeline, where each stage prepares
+        # each image for building the PCA model at every scale specified.
+        all_scaled_images = process_image_per_scale(image, reference_frame)
+        # Build the appearance and shape model for each scale, separately
+        for k, scale_images in enumerate(zip(*all_scaled_images)):
+            if exist_app_model:
+                app_models[k].increment(scale_images)
+            else:
+                app_models.append(build_appearance_model(scale_images))
 
+            scale_shapes = (i.landmarks[group][label] for i in scale_images)
+            if exist_shape_model:
+                shape_models[k].increment(scale_images)
+            else:
+                shape_models.append(build_shape_model(scale_shapes))
 
-    if first_iteration:
-        feature_image = features(image)
-    elif scale_features:
-        scaled_image = image.rescale(feature_image)
-    else:
-        scaled_image = image.rescale(image)
-        feature_image = features(scaled_image)
+    # Reverse the models as we want to proceed the from smallest to largest
+    # at test time.
+    shape_models.reverse()
+    app_models.reverse()
 
-#for image in images:
-#   normalize image
-#   feature?
-#   for scale in scales:
-#       features?
-#       warp
-#       PCA
+    return app_models, shape_models
+
 
 class AAMBuilder(object):
     def build(self, images, group=None, label=None, verbose=False):
@@ -276,8 +408,7 @@ class GlobalAAMBuilder(AAMBuilder):
         self.boundary = boundary
 
     def _build_reference_frame(self, mean_shape):
-        return build_reference_frame(mean_shape, boundary=self.boundary,
-                                     trilist=self.trilist)
+        return
 
     def _warp_images(self, images, shapes, ref_shape, level_str, verbose):
         # compute transforms
