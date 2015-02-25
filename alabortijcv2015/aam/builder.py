@@ -229,6 +229,8 @@ class GlobalAAMBuilder(AAMBuilder):
         ref_frame = self._build_reference_frame(ref_shape)
         # warp images to reference frame
         warped_images = []
+        t = self.transform(ref_frame.landmarks['source'].lms,
+                           ref_frame.landmarks['source'].lms)
         for c, (i, s) in enumerate(zip(images, shapes)):
             if verbose:
                 print_dynamic('{}Warping images - {}'.format(
@@ -236,7 +238,7 @@ class GlobalAAMBuilder(AAMBuilder):
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
             # compute transforms
-            t = self.transform(ref_frame.landmarks['source'].lms, s)
+            t.set_target(s)
             # warp images
             warped_i = i.warp_to_mask(ref_frame.mask, t)
             # attach reference frame landmarks to images
@@ -278,6 +280,8 @@ class PatchAAMBuilder(AAMBuilder):
         ref_frame = self._build_reference_frame(ref_shape)
         # warp images to reference frame
         warped_images = []
+        t = self.transform(ref_frame.landmarks['source'].lms,
+                           ref_frame.landmarks['source'].lms)
         for c, (i, s) in enumerate(zip(images, shapes)):
             if verbose:
                 print_dynamic('{}Warping images - {}'.format(
@@ -285,7 +289,7 @@ class PatchAAMBuilder(AAMBuilder):
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
             # compute transforms
-            t = self.transform(ref_frame.landmarks['source'].lms, s)
+            t.set_target(s)
             # warp images
             warped_i = i.warp_to_mask(ref_frame.mask, t)
             # attach reference frame landmarks to images
