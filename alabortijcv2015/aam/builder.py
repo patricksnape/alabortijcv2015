@@ -1,10 +1,10 @@
 from __future__ import division
 import abc
-from copy import deepcopy
 import numpy as np
+import itertools
 
 from menpo.shape import PointCloud
-from menpo.transform import Scale, Translation, GeneralizedProcrustesAnalysis
+from menpo.transform import Translation, GeneralizedProcrustesAnalysis, UniformScale
 from menpo.model import PCAModel
 from menpo.shape import mean_pointcloud
 from menpo.image import Image
@@ -19,29 +19,124 @@ from .base import build_reference_frame, build_patch_reference_frame
 
 
 # Abstract Interface for AAM Builders -----------------------------------------
+def batch(iterable, n):
+    it = iter(iterable)
+    while True:
+        chunk = tuple(itertools.islice(it, n))
+        if not chunk:
+            return
+        yield chunk
+
 
 class AAMBuilder(object):
 
-    def build(self, images, group=None, label=None, verbose=False):
+    def build_batched(self, images, reference_shape, batch_size=100, group=None,
+                      label=None, app_forgetting_factor=1.0,
+                      shape_forgetting_factor=1.0, verbose=False):
+        if self.diagonal:
+            reference_shape = self._scale_shape_diagonal(reference_shape,
+                                                         self.diagonal)
+
+        # Create a generator of fixed sized batches. Will still work even
+        # on an infinite list.
+        image_batches = batch(images, batch_size)
+
+        if verbose:
+            print('Building AAM using batches of size {}'.format(batch_size))
+
+        shape_models = []
+        appearance_models = []
+        for k, image_batch in enumerate(image_batches):
+            if k == 0:
+                if verbose:
+                    print('Creating batch 1 - initial models')
+                data_prepare = self._prepare_data(image_batch, group=group, label=label,
+                                                  reference_shape=reference_shape,
+                                                  verbose=verbose)
+                for j, (warped_images, scaled_shapes) in enumerate(data_prepare):
+                    s_app_model, s_shape_model = self._build_models(warped_images,
+                                                                    scaled_shapes,
+                                                                    verbose=verbose)
+                    appearance_models.append(s_app_model)
+                    shape_models.append(s_shape_model)
+                    if verbose:
+                        print_dynamic(' - Level {} - Done\n'.format(j))
+            else:
+                if verbose:
+                    print('Increment with batch {}'.format(k + 1))
+                data_prepare = self._prepare_data(image_batch, group=group, label=label,
+                                                  reference_shape=reference_shape,
+                                                  verbose=verbose)
+                for j, (warped_images, scaled_shapes) in enumerate(data_prepare):
+                    if verbose:
+                        print_dynamic(' - Incrementing Appearance Model with {} images.'.format(len(warped_images)))
+                    appearance_models[j].increment(
+                        warped_images, forgetting_factor=app_forgetting_factor,
+                        verbose=False)
+                    if verbose:
+                        print_dynamic(' - Incrementing Shape Model with {} shapes.'.format(len(scaled_shapes)))
+                    shape_models[j].increment(
+                        self._align_shapes(scaled_shapes,
+                                           target=shape_models[j].mean()),
+                        forgetting_factor=shape_forgetting_factor,
+                        verbose=False)
+                    if verbose:
+                        print_dynamic(' - Batch {}, Level {} - Done\n'.format(k + 1, j))
+        # reverse the list of shape and appearance models so that they are
+        # ordered from lower to higher resolution
+        shape_models.reverse()
+        appearance_models.reverse()
+
+        return self._build_aam(shape_models, appearance_models, reference_shape)
+
+    def build(self, images, group=None, label=None,
+              reference_shape=None,
+              verbose=False):
         # compute reference shape
-        reference_shape = self._compute_reference_shape(images, group, label,
-                                                        verbose)
+        if reference_shape is None:
+            reference_shape = self._compute_reference_shape(images, group,
+                                                            label, verbose)
+
+        shape_models = []
+        appearance_models = []
+
+        if verbose:
+            print_dynamic('Building models\n')
+
+        data_prepare = self._prepare_data(images, group=group, label=label,
+                                          reference_shape=reference_shape,
+                                          verbose=verbose)
+        for k, (warped_images, scaled_shapes) in enumerate(data_prepare):
+            s_app_model, s_shape_model = self._build_models(warped_images,
+                                                            scaled_shapes,
+                                                            verbose=verbose)
+            appearance_models.append(s_app_model)
+            shape_models.append(s_shape_model)
+            if verbose:
+                print_dynamic(' - Level {} - Done\n'.format(k))
+
+        # reverse the list of shape and appearance models so that they are
+        # ordered from lower to higher resolution
+        shape_models.reverse()
+        appearance_models.reverse()
+
+        return self._build_aam(shape_models, appearance_models, reference_shape)
+
+    def _prepare_data(self, images, reference_shape, group=None, label=None,
+                      verbose=False):
         # normalize images
         images = self._normalize_images(images, group, label, reference_shape,
                                         verbose)
+        original_shapes = [i.landmarks[group][label] for i in images]
 
         # build models at each scale
-        if verbose:
-            print_dynamic('- Building models\n')
-        shape_models = []
-        appearance_models = []
         # for each pyramid level (high --> low)
         for j, s in enumerate(self.scales):
             if verbose:
                 if len(self.scales) > 1:
-                    level_str = '  - Level {}: '.format(j)
+                    level_str = ' - Level {}: '.format(j)
                 else:
-                    level_str = '  - '
+                    level_str = ' - '
 
             # obtain image representation
             if j == 0:
@@ -61,50 +156,40 @@ class AAMBuilder(object):
                                                       level_str, verbose)
 
             # extract potentially rescaled shapes ath highest level
-            level_shapes = [i.landmarks[group][label]
-                            for i in level_images]
-
-            # obtain shape representation
-            if j == 0 or self.scale_shapes:
-                # obtain shape model
-                if verbose:
-                    print_dynamic('{}Building shape model'.format(level_str))
-                shape_model = self._build_shape_model(
-                    level_shapes, self.max_shape_components)
-                # add shape model to the list
-                shape_models.append(shape_model)
+            if self.scale_shapes:
+                level_shapes = [i.landmarks[group][label]
+                                for i in level_images]
             else:
-                # copy precious shape model and add it to the list
-                shape_models.append(deepcopy(shape_model))
+                level_shapes = original_shapes
 
             # obtain warped images
+            scaled_ref_frame = UniformScale(s, reference_shape.n_dims).apply(reference_shape)
             warped_images = self._warp_images(level_images, level_shapes,
-                                              shape_model.mean(), level_str,
+                                              scaled_ref_frame, level_str,
                                               verbose)
+            yield warped_images, level_shapes
 
-            # obtain appearance model
-            if verbose:
-                print_dynamic('{}Building appearance model'.format(level_str))
-            appearance_model = PCAModel(warped_images)
-            # trim appearance model if required
-            if self.max_appearance_components is not None:
-                appearance_model.trim_components(
-                    self.max_appearance_components)
-            # add appearance model to the list
-            appearance_models.append(appearance_model)
+    def _build_models(self, warped_images, scaled_shapes, verbose=False):
+        if verbose:
+            print_dynamic(' - Building shape model')
+        shape_model = self._build_shape_model(
+            scaled_shapes, self.max_shape_components)
 
-            if verbose:
-                print_dynamic('{}Done\n'.format(level_str))
+        # obtain appearance model
+        if verbose:
+            print_dynamic(' - Building appearance model')
+        appearance_model = PCAModel(warped_images)
+        # trim appearance model if required
+        if self.max_appearance_components is not None:
+            appearance_model.trim_components(
+                self.max_appearance_components)
 
-        # reverse the list of shape and appearance models so that they are
-        # ordered from lower to higher resolution
-        shape_models.reverse()
-        appearance_models.reverse()
-        self.scales.reverse()
+        return appearance_model, shape_model
 
-        aam = self._build_aam(shape_models, appearance_models, reference_shape)
-
-        return aam
+    def _scale_shape_diagonal(self, ref_shape, diagonal):
+        x, y = ref_shape.range()
+        scale = self.diagonal / np.sqrt(x**2 + y**2)
+        return UniformScale(scale, ref_shape.n_dims).apply(ref_shape)
 
     def _compute_reference_shape(self, images, group, label, verbose):
         # the reference_shape is the mean shape of the images' landmarks
@@ -114,9 +199,7 @@ class AAMBuilder(object):
         ref_shape = mean_pointcloud(shapes)
         # fix the reference_shape's diagonal length if specified
         if self.diagonal:
-            x, y = ref_shape.range()
-            scale = self.diagonal / np.sqrt(x**2 + y**2)
-            Scale(scale, ref_shape.n_dims).apply_inplace(ref_shape)
+            ref_shape = self._scale_shape_diagonal(ref_shape, self.diagonal)
         return ref_shape
 
     def _normalize_images(self, images, group, label, ref_shape, verbose):
@@ -159,6 +242,14 @@ class AAMBuilder(object):
             scaled_images.append(i.rescale(s))
         return scaled_images
 
+
+    @classmethod
+    def _align_shapes(cls, shapes, target=None):
+        centered_shapes = [Translation(-s.centre()).apply(s) for s in shapes]
+        # align centralized shape using Procrustes Analysis
+        gpa = GeneralizedProcrustesAnalysis(centered_shapes, target=target)
+        return [s.aligned_source() for s in gpa.transforms]
+
     @classmethod
     def _build_shape_model(cls, shapes, max_components):
         r"""
@@ -179,14 +270,8 @@ class AAMBuilder(object):
         shape_model: :class:`menpo.model.pca`
             The PCA shape model.
         """
-
-        # centralize shapes
-        centered_shapes = [Translation(-s.centre()).apply(s) for s in shapes]
-        # align centralized shape using Procrustes Analysis
-        gpa = GeneralizedProcrustesAnalysis(centered_shapes)
-        aligned_shapes = [s.aligned_source() for s in gpa.transforms]
         # build shape model
-        shape_model = PCAModel(aligned_shapes)
+        shape_model = PCAModel(cls._align_shapes(shapes))
         if max_components is not None:
             # trim shape model if required
             shape_model.trim_components(max_components)
@@ -249,7 +334,8 @@ class GlobalAAMBuilder(AAMBuilder):
     def _build_aam(self, shape_models, appearance_models, reference_shape):
         return GlobalAAM(shape_models, appearance_models, reference_shape,
                          self.transform, self.features, self.sigma,
-                         self.scales, self.scale_shapes, self.scale_features)
+                         list(reversed(self.scales)),
+                         self.scale_shapes, self.scale_features)
 
 
 class PatchAAMBuilder(AAMBuilder):
@@ -300,7 +386,8 @@ class PatchAAMBuilder(AAMBuilder):
     def _build_aam(self, shape_models, appearance_models, reference_shape):
         return PatchAAM(shape_models, appearance_models, reference_shape,
                         self.patch_shape, self.features, self.sigma,
-                        self.scales, self.scale_shapes, self.scale_features)
+                        list(reversed(self.scales)), self.scale_shapes,
+                        self.scale_features)
 
 
 class LinearGlobalAAMBuilder(GlobalAAMBuilder):
@@ -374,7 +461,8 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
     def _build_aam(self, shape_models, appearance_models, reference_shape):
         return LinearGlobalAAM(shape_models, appearance_models,
                                reference_shape, self.transform,
-                               self.features, self.sigma, self.scales,
+                               self.features, self.sigma,
+                               list(reversed(self.scales)),
                                self.scale_shapes, self.scale_features,
                                self.n_landmarks)
 
@@ -450,7 +538,8 @@ class LinearPatchAAMBuilder(PatchAAMBuilder):
     def _build_aam(self, shape_models, appearance_models, reference_shape):
         return LinearPatchAAM(shape_models, appearance_models,
                               reference_shape, self.patch_shape,
-                              self.features, self.sigma, self.scales,
+                              self.features, self.sigma,
+                              list(reversed(self.scales)),
                               self.scale_shapes, self.scale_features,
                               self.n_landmarks)
 
