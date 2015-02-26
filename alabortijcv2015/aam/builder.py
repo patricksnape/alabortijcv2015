@@ -49,7 +49,8 @@ class AAMBuilder(object):
         for k, image_batch in enumerate(image_batches):
             if k == 0:
                 if verbose:
-                    print('Creating batch 1 - initial models')
+                    print('Creating batch 1 - initial models '
+                          'with {} images'.format(len(image_batch)))
                 data_prepare = self._prepare_data(image_batch, group=group, label=label,
                                                   reference_shape=reference_shape,
                                                   verbose=verbose)
@@ -63,25 +64,29 @@ class AAMBuilder(object):
                         print_dynamic(' - Level {} - Done\n'.format(j))
             else:
                 if verbose:
-                    print('Increment with batch {}'.format(k + 1))
+                    print('Increment with batch {} - '
+                          '{} images'.format(k + 1, len(image_batch)))
                 data_prepare = self._prepare_data(image_batch, group=group, label=label,
                                                   reference_shape=reference_shape,
                                                   verbose=verbose)
                 for j, (warped_images, scaled_shapes) in enumerate(data_prepare):
                     if verbose:
-                        print_dynamic(' - Incrementing Appearance Model with {} images.'.format(len(warped_images)))
+                        print_dynamic(' - Incrementing Appearance Model with {} '
+                                      'images.'.format(len(warped_images)))
                     appearance_models[j].increment(
                         warped_images, forgetting_factor=app_forgetting_factor,
                         verbose=False)
                     if verbose:
-                        print_dynamic(' - Incrementing Shape Model with {} shapes.'.format(len(scaled_shapes)))
+                        print_dynamic(' - Incrementing Shape Model with {} '
+                                      'shapes.'.format(len(scaled_shapes)))
                     shape_models[j].increment(
                         self._align_shapes(scaled_shapes,
                                            target=shape_models[j].mean()),
                         forgetting_factor=shape_forgetting_factor,
                         verbose=False)
                     if verbose:
-                        print_dynamic(' - Batch {}, Level {} - Done\n'.format(k + 1, j))
+                        print_dynamic(' - Batch {}, Level {} - '
+                                      'Done\n'.format(k + 1, j))
         # reverse the list of shape and appearance models so that they are
         # ordered from lower to higher resolution
         shape_models.reverse()
@@ -196,7 +201,7 @@ class AAMBuilder(object):
         if verbose:
             print_dynamic('- Computing reference shape')
         shapes = [i.landmarks[group][label] for i in images]
-        ref_shape = mean_pointcloud(shapes)
+        ref_shape = mean_pointcloud(self._align_shapes(shapes))
         # fix the reference_shape's diagonal length if specified
         if self.diagonal:
             ref_shape = self._scale_shape_diagonal(ref_shape, self.diagonal)
