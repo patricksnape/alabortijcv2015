@@ -160,19 +160,21 @@ class AAMBuilder(object):
                 level_images = self._compute_features(scaled_images,
                                                       level_str, verbose)
 
-            # extract potentially rescaled shapes ath highest level
-            if self.scale_shapes:
-                level_shapes = [i.landmarks[group][label]
-                                for i in level_images]
-            else:
-                level_shapes = original_shapes
+            # Rescaled shapes
+            level_shapes = [i.landmarks[group][label] for i in level_images]
 
             # obtain warped images
             scaled_ref_frame = UniformScale(s, reference_shape.n_dims).apply(reference_shape)
             warped_images = self._warp_images(level_images, level_shapes,
                                               scaled_ref_frame, level_str,
                                               verbose)
-            yield warped_images, level_shapes
+
+            if self.scale_shapes:
+                shape_model_shapes = level_shapes
+            else:
+                shape_model_shapes = original_shapes
+
+            yield warped_images, shape_model_shapes
 
     def _build_models(self, warped_images, scaled_shapes, verbose=False):
         if verbose:
@@ -586,7 +588,8 @@ class PartsAAMBuilder(AAMBuilder):
     def _build_aam(self, shape_models, appearance_models, reference_shape):
         return PartsAAM(shape_models, appearance_models, reference_shape,
                         self.parts_shape, self.features,
-                        self.normalize_parts, self.sigma, self.scales,
+                        self.normalize_parts, self.sigma,
+                        list(reversed(self.scales)),
                         self.scale_shapes, self.scale_features)
 
 
