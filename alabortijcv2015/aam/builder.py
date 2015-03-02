@@ -4,7 +4,8 @@ import numpy as np
 import itertools
 
 from menpo.shape import PointCloud
-from menpo.transform import Translation, GeneralizedProcrustesAnalysis, UniformScale
+from menpo.transform import (Translation, GeneralizedProcrustesAnalysis,
+                             UniformScale, AlignmentSimilarity)
 from menpo.model import PCAModel
 from menpo.shape import mean_pointcloud
 from menpo.image import Image
@@ -47,17 +48,18 @@ class AAMBuilder(object):
         shape_models = []
         appearance_models = []
         for k, image_batch in enumerate(image_batches):
+            curr_batch_size = len(image_batch)
+
             if k == 0:
                 if verbose:
                     print('Creating batch 1 - initial models '
-                          'with {} images'.format(len(image_batch)))
-                data_prepare = self._prepare_data(image_batch, group=group, label=label,
-                                                  reference_shape=reference_shape,
-                                                  verbose=verbose)
-                for j, (warped_images, scaled_shapes) in enumerate(data_prepare):
-                    s_app_model, s_shape_model = self._build_models(warped_images,
-                                                                    scaled_shapes,
-                                                                    verbose=verbose)
+                          'with {} images'.format(curr_batch_size))
+                data_prepare = self._prepare_data(
+                    image_batch, group=group, label=label,
+                    reference_shape=reference_shape, verbose=verbose)
+                for j, (warped_imgs, scaled_shapes) in enumerate(data_prepare):
+                    s_app_model, s_shape_model = self._build_models(
+                        warped_imgs, scaled_shapes, verbose=verbose)
                     appearance_models.append(s_app_model)
                     shape_models.append(s_shape_model)
                     if verbose:
@@ -65,23 +67,30 @@ class AAMBuilder(object):
             else:
                 if verbose:
                     print('Increment with batch {} - '
-                          '{} images'.format(k + 1, len(image_batch)))
-                data_prepare = self._prepare_data(image_batch, group=group, label=label,
-                                                  reference_shape=reference_shape,
-                                                  verbose=verbose)
-                for j, (warped_images, scaled_shapes) in enumerate(data_prepare):
+                          '{} images'.format(k + 1, curr_batch_size))
+                data_prepare = self._prepare_data(
+                    image_batch, group=group, label=label,
+                    reference_shape=reference_shape, verbose=verbose)
+                for j, (warped_imgs, scaled_shapes) in enumerate(data_prepare):
                     if verbose:
-                        print_dynamic(' - Incrementing Appearance Model with {} '
-                                      'images.'.format(len(warped_images)))
+                        print_dynamic(' - Incrementing Appearance Model with '
+                                      '{} images.'.format(len(warped_imgs)))
                     appearance_models[j].increment(
-                        warped_images, forgetting_factor=app_forgetting_factor,
+                        warped_imgs, forgetting_factor=app_forgetting_factor,
                         verbose=False)
                     if verbose:
                         print_dynamic(' - Incrementing Shape Model with {} '
-                                      'shapes.'.format(len(scaled_shapes)))
+                                      'shapes.'.format(curr_batch_size))
+
+                    # Before incrementing the shape model, we need to remove
+                    # similarity differences between the new shapes and the
+                    # model
+                    aligned_shapes = [
+                        AlignmentSimilarity(s, shape_models[j].mean()).apply(s)
+                        for s in scaled_shapes
+                    ]
                     shape_models[j].increment(
-                        self._align_shapes(scaled_shapes,
-                                           target=shape_models[j].mean()),
+                        aligned_shapes,
                         forgetting_factor=shape_forgetting_factor,
                         verbose=False)
                     if verbose:
@@ -251,10 +260,10 @@ class AAMBuilder(object):
 
 
     @classmethod
-    def _align_shapes(cls, shapes, target=None):
+    def _align_shapes(cls, shapes):
         centered_shapes = [Translation(-s.centre()).apply(s) for s in shapes]
         # align centralized shape using Procrustes Analysis
-        gpa = GeneralizedProcrustesAnalysis(centered_shapes, target=target)
+        gpa = GeneralizedProcrustesAnalysis(centered_shapes)
         return [s.aligned_source() for s in gpa.transforms]
 
     @classmethod
