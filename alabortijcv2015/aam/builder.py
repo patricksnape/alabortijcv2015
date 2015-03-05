@@ -78,6 +78,9 @@ class AAMBuilder(object):
                     appearance_models[j].increment(
                         warped_imgs, forgetting_factor=app_forgetting_factor,
                         verbose=False)
+                    if self.max_appearance_components is not None:
+                        appearance_models[j].trim_components(
+                            self.max_appearance_components)
                     if verbose:
                         print_dynamic(' - Incrementing Shape Model with {} '
                                       'shapes.'.format(curr_batch_size))
@@ -93,6 +96,9 @@ class AAMBuilder(object):
                         aligned_shapes,
                         forgetting_factor=shape_forgetting_factor,
                         verbose=False)
+                    if self.max_shape_components is not None:
+                        shape_models[j].trim_components(
+                            self.max_shape_components)
                     if verbose:
                         print_dynamic(' - Batch {}, Level {} - '
                                       'Done\n'.format(k + 1, j))

@@ -179,7 +179,7 @@ class PatchAAM(AAM):
             reference_frame.landmarks['source'].lms, landmarks)
 
         instance = appearance_instance.warp_to_mask(reference_frame.mask,
-                                                transform)
+                                                    transform)
         instance.landmarks = reference_frame.landmarks
 
         return instance
