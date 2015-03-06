@@ -229,6 +229,8 @@ class FitterResult(Result):
         self.algorithm_results = algorithm_results
         self._affine_correction = affine_correction
         self._gt_shape = gt_shape
+        # TODO: Remove when the widgets are fixed.
+        self.downscale = 0
 
     @property
     def n_levels(self):
