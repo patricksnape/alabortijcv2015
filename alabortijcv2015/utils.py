@@ -1,6 +1,6 @@
 from __future__ import division
 import cPickle
-from skimage.filter import gaussian_filter
+from skimage.filters import gaussian_filter
 
 
 def pickle_load(path):

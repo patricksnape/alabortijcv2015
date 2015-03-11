@@ -31,6 +31,25 @@ def batch(iterable, n):
 
 class AAMBuilder(object):
 
+    def increment_aam(self, aam, images, group=None,
+                      label=None, app_forgetting_factor=1.0,
+                      shape_forgetting_factor=1.0, verbose=False):
+        shape_models = aam.shape_models
+        appearance_models = aam.appearance_models
+        reference_shape = aam.reference_shape
+
+        if verbose:
+            print('Incrementing AAM with batch {} images'.format(len(images)))
+
+        self._increment_models(
+            images, shape_models, appearance_models,
+            reference_shape, group=group,
+            label=label, app_forgetting_factor=app_forgetting_factor,
+            shape_forgetting_factor=shape_forgetting_factor,
+            verbose=verbose)
+
+        return aam
+
     def build_batched(self, images, reference_shape, batch_size=100, group=None,
                       label=None, app_forgetting_factor=1.0,
                       shape_forgetting_factor=1.0, verbose=False):
@@ -68,40 +87,12 @@ class AAMBuilder(object):
                 if verbose:
                     print('Increment with batch {} - '
                           '{} images'.format(k + 1, curr_batch_size))
-                data_prepare = self._prepare_data(
-                    image_batch, group=group, label=label,
-                    reference_shape=reference_shape, verbose=verbose)
-                for j, (warped_imgs, scaled_shapes) in enumerate(data_prepare):
-                    if verbose:
-                        print_dynamic(' - Incrementing Appearance Model with '
-                                      '{} images.'.format(len(warped_imgs)))
-                    appearance_models[j].increment(
-                        warped_imgs, forgetting_factor=app_forgetting_factor,
-                        verbose=False)
-                    if self.max_appearance_components is not None:
-                        appearance_models[j].trim_components(
-                            self.max_appearance_components)
-                    if verbose:
-                        print_dynamic(' - Incrementing Shape Model with {} '
-                                      'shapes.'.format(curr_batch_size))
-
-                    # Before incrementing the shape model, we need to remove
-                    # similarity differences between the new shapes and the
-                    # model
-                    aligned_shapes = [
-                        AlignmentSimilarity(s, shape_models[j].mean()).apply(s)
-                        for s in scaled_shapes
-                    ]
-                    shape_models[j].increment(
-                        aligned_shapes,
-                        forgetting_factor=shape_forgetting_factor,
-                        verbose=False)
-                    if self.max_shape_components is not None:
-                        shape_models[j].trim_components(
-                            self.max_shape_components)
-                    if verbose:
-                        print_dynamic(' - Batch {}, Level {} - '
-                                      'Done\n'.format(k + 1, j))
+                self._increment_models(
+                    image_batch, shape_models, appearance_models,
+                    reference_shape, group=group,
+                    label=label, app_forgetting_factor=app_forgetting_factor,
+                    shape_forgetting_factor=shape_forgetting_factor,
+                    verbose=verbose)
         # reverse the list of shape and appearance models so that they are
         # ordered from lower to higher resolution
         shape_models.reverse()
@@ -141,6 +132,45 @@ class AAMBuilder(object):
         appearance_models.reverse()
 
         return self._build_aam(shape_models, appearance_models, reference_shape)
+
+    def _increment_models(self, image_batch, shape_models, appearance_models,
+                          reference_shape, group=None,
+                          label=None, app_forgetting_factor=1.0,
+                          shape_forgetting_factor=1.0, verbose=False):
+        curr_batch_size = len(image_batch)
+        data_prepare = self._prepare_data(
+            image_batch, group=group, label=label,
+            reference_shape=reference_shape, verbose=verbose)
+        for j, (warped_imgs, scaled_shapes) in enumerate(data_prepare):
+            if verbose:
+                print_dynamic(' - Incrementing Appearance Model with '
+                              '{} images.'.format(len(warped_imgs)))
+            appearance_models[j].increment(
+                warped_imgs, forgetting_factor=app_forgetting_factor,
+                verbose=False)
+            if self.max_appearance_components is not None:
+                appearance_models[j].trim_components(
+                    self.max_appearance_components)
+            if verbose:
+                print_dynamic(' - Incrementing Shape Model with {} '
+                              'shapes.'.format(curr_batch_size))
+
+            # Before incrementing the shape model, we need to remove
+            # similarity differences between the new shapes and the
+            # model
+            aligned_shapes = [
+                AlignmentSimilarity(s, shape_models[j].mean()).apply(s)
+                for s in scaled_shapes
+            ]
+            shape_models[j].increment(
+                aligned_shapes,
+                forgetting_factor=shape_forgetting_factor,
+                verbose=False)
+            if self.max_shape_components is not None:
+                shape_models[j].trim_components(
+                    self.max_shape_components)
+            if verbose:
+                print_dynamic(' - Level {} - Done\n'.format(j))
 
     def _prepare_data(self, images, reference_shape, group=None, label=None,
                       verbose=False):
