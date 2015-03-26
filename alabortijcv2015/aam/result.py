@@ -43,20 +43,20 @@ class LinearAAMAlgorithmResult(AAMAlgorithmResult):
 
     def shapes(self, as_points=False):
         if as_points:
-            return [self.fitter.transform.from_vector(p).sparse_target.points
+            return [self.fitter.transform.from_vector(p).dense_target.points
                     for p in self.shape_parameters]
 
         else:
-            return [self.fitter.transform.from_vector(p).sparse_target
+            return [self.fitter.transform.from_vector(p).dense_target
                     for p in self.shape_parameters]
 
     @property
     def final_shape(self):
-        return self.final_transform.sparse_target
+        return self.final_transform.dense_target
 
     @property
     def initial_shape(self):
-        return self.initial_transform.sparse_target
+        return self.initial_transform.dense_target
 
 
 # Concrete Implementations of AAM Fitter Results ------------------------------

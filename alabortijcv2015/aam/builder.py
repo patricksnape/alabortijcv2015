@@ -210,6 +210,7 @@ class AAMBuilder(object):
 
             # obtain warped images
             scaled_ref_frame = UniformScale(s, reference_shape.n_dims).apply(reference_shape)
+            self.current_scale = s
             warped_images = self._warp_images(level_images, level_shapes,
                                               scaled_ref_frame, level_str,
                                               verbose)
@@ -240,7 +241,7 @@ class AAMBuilder(object):
 
     def _scale_shape_diagonal(self, ref_shape, diagonal):
         x, y = ref_shape.range()
-        scale = self.diagonal / np.sqrt(x**2 + y**2)
+        scale = diagonal / np.sqrt(x**2 + y**2)
         return UniformScale(scale, ref_shape.n_dims).apply(ref_shape)
 
     def _compute_reference_shape(self, images, group, label, verbose):
@@ -467,56 +468,47 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
         shape_model = GlobalAAMBuilder._build_shape_model(
             shapes, max_components)
 
-        self.n_landmarks = shape_model.mean().n_points
-
-        self.reference_frame = self._build_reference_frame(shape_model.mean())
-
-        # compute non-linear transforms
-        transforms = (
-            [self.transform(self.reference_frame.landmarks['source'].lms, s)
-             for s in shapes])
-
-        # build dense shapes
-        dense_shapes = []
-        for (t, s) in zip(transforms, shapes):
-            warped_points = t.apply(self.reference_frame.mask.true_indices())
-            dense_shape = PointCloud(np.vstack((s.points, warped_points)))
-            dense_shapes.append(dense_shape)
-
-        # build dense shape mode3l
-        shape_model = GlobalAAMBuilder._build_shape_model(
-            dense_shapes, max_components)
-
         return shape_model
 
-    def _warp_images(self, images, shapes, reference_shape, level_str, verbose):
+    def _warp_images(self, images, _, ref_shape, level_str, verbose):
+        from .base import _build_reference_frame
+
+        ref_frame = GlobalAAMBuilder._build_reference_frame(self, ref_shape)
+        dense_landmarks = self.reference_frame.landmarks['source'].lms.copy()
+        trans = Translation(-dense_landmarks.centre())
+        trans = trans.compose_before(UniformScale(self.current_scale,
+                                                  ref_shape.n_dims))
+        scaled_source = _build_reference_frame(
+            trans.apply(dense_landmarks),
+            boundary=self.boundary).landmarks['source'].lms
 
         # warp images to reference frame
         warped_images = []
-        for c, (i, s) in enumerate(zip(images, shapes)):
+        t = self.transform(ref_frame.landmarks['source'].lms,
+                           ref_frame.landmarks['source'].lms)
+        for c, i in enumerate(images):
             if verbose:
                 print_dynamic('{}Warping images - {}'.format(
                     level_str,
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
             # compute transforms
-            t = self.transform(PointCloud(self.reference_frame.landmarks[
-                'source'].lms.points[:self.n_landmarks]), s)
+            t.set_target(i.landmarks[None].lms)
             # warp images
-            warped_i = i.warp_to_mask(self.reference_frame.mask, t)
+            warped_i = i.warp_to_mask(ref_frame.mask, t)
             # attach reference frame landmarks to images
-            warped_i.landmarks['source'] = \
-                self.reference_frame.landmarks['source']
+            warped_i.landmarks['source'] = scaled_source
             warped_images.append(warped_i)
         return warped_images
 
     def _build_aam(self, shape_models, appearance_models, reference_shape):
         return LinearGlobalAAM(shape_models, appearance_models,
-                               reference_shape, self.transform,
+                               self.reference_frame.landmarks['source'].lms,
+                               self.transform,
                                self.features, self.sigma,
                                list(reversed(self.scales)),
                                self.scale_shapes, self.scale_features,
-                               self.n_landmarks)
+                               0)
 
 
 class LinearPatchAAMBuilder(PatchAAMBuilder):

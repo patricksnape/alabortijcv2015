@@ -409,8 +409,9 @@ class OrthoLinearMDTransform(OrthoPDM, Transform):
 
         self.W = np.vstack((self.similarity_model.components,
                             self.model.components))
-        V = self.W[:, :self.n_dims*self.n_landmarks]
-        self.pinv_V = np.linalg.pinv(V)
+        if self.n_landmarks:
+            V = self.W[:, :self.n_dims*self.n_landmarks]
+            self.pinv_V = np.linalg.pinv(V)
 
     @property
     def dense_target(self):
@@ -421,7 +422,7 @@ class OrthoLinearMDTransform(OrthoPDM, Transform):
         return PointCloud(self.target.points[:self.n_landmarks])
 
     def set_target(self, target):
-        if target.n_points == self.n_landmarks:
+        if self.n_landmarks and target.n_points == self.n_landmarks:
             # densify target
             target = np.dot(np.dot(target.as_vector(), self.pinv_V), self.W)
             target = PointCloud(np.reshape(target, (-1, self.n_dims)))

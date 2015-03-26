@@ -169,7 +169,7 @@ class PatchAAM(AAM):
         self.scale_features = scale_features
 
     def _instance(self, level, shape_instance, appearance_instance):
-        template = self.appearance_models[level].mean
+        template = self.appearance_models[level].mean()
         landmarks = template.landmarks['source'].lms
 
         reference_frame = self._build_reference_frame(
@@ -205,6 +205,29 @@ class LinearGlobalAAM(AAM):
         self.scale_shapes = scale_shapes
         self.scale_features = scale_features
         self.n_landmarks = n_landmarks
+
+    def _instance(self, level, shape_instance, appearance_instance):
+        template = self.appearance_models[level].mean()
+        landmarks = template.landmarks['source'].lms
+
+        reference_frame = self._build_reference_frame(
+            shape_instance, landmarks)
+
+        transform = self.transform(
+            reference_frame.landmarks['source'].lms, landmarks)
+
+        instance = appearance_instance.as_unmasked().warp_to_mask(
+            reference_frame.mask, transform, batch_size=3000)
+        instance.landmarks = reference_frame.landmarks
+
+        return instance
+
+    def _build_reference_frame(self, reference_shape, landmarks):
+        if type(landmarks) == TriMesh:
+            trilist = landmarks.trilist
+        else:
+            trilist = None
+        return build_reference_frame(reference_shape, trilist=trilist)
 
 
 class LinearPatchAAM(AAM):
@@ -284,7 +307,8 @@ def build_reference_frame(landmarks, boundary=3, group='source',
 
     # TODO: revise kwarg trilist in method constrain_mask_to_landmarks,
     # perhaps the trilist should be directly obtained from the group landmarks
-    reference_frame.constrain_mask_to_landmarks(group=group, trilist=trilist)
+    reference_frame.constrain_mask_to_landmarks(
+        group=group)
 
     return reference_frame
 
