@@ -1,32 +1,21 @@
 from __future__ import division
 import abc
 import numpy as np
-import itertools
 
 from menpo.shape import PointCloud
-from menpo.transform import (Translation, GeneralizedProcrustesAnalysis,
-                             UniformScale, AlignmentSimilarity)
-from menpo.model import PCAModel
-from menpo.shape import mean_pointcloud
+from menpo.transform import Translation, UniformScale, AlignmentSimilarity
 from menpo.image import Image
+from menpo.feature import no_op
 from menpo.visualize import print_dynamic, progress_bar_str
 
 from menpofit.transform import (DifferentiablePiecewiseAffine,
                                 DifferentiableThinPlateSplines)
 
-from alabortijcv2015.utils import fsmooth
+from ..builder import batch, scale_shape_diagonal, compute_reference_shape, \
+    normalize_images, compute_features, scale_images, build_appearance_model, \
+    build_shape_model, build_reference_frame, build_patch_reference_frame
 
-from .base import build_reference_frame, build_patch_reference_frame
-
-
-# Abstract Interface for AAM Builders -----------------------------------------
-def batch(iterable, n):
-    it = iter(iterable)
-    while True:
-        chunk = tuple(itertools.islice(it, n))
-        if not chunk:
-            return
-        yield chunk
+# Abstract Interface for ATM Builders -----------------------------------------
 
 
 class AAMBuilder(object):
@@ -39,7 +28,7 @@ class AAMBuilder(object):
         reference_shape = aam.reference_shape
 
         if verbose:
-            print('Incrementing AAM with batch {} images'.format(len(images)))
+            print('Incrementing ATM with batch {} images'.format(len(images)))
 
         self._increment_models(
             images, shape_models, appearance_models,
@@ -54,15 +43,15 @@ class AAMBuilder(object):
                       label=None, app_forgetting_factor=1.0,
                       shape_forgetting_factor=1.0, verbose=False):
         if self.diagonal:
-            reference_shape = self._scale_shape_diagonal(reference_shape,
-                                                         self.diagonal)
+            reference_shape = scale_shape_diagonal(reference_shape,
+                                                   self.diagonal)
 
         # Create a generator of fixed sized batches. Will still work even
         # on an infinite list.
         image_batches = batch(images, batch_size)
 
         if verbose:
-            print('Building AAM using batches of size {}'.format(batch_size))
+            print('Building ATM using batches of size {}'.format(batch_size))
 
         shape_models = []
         appearance_models = []
@@ -73,9 +62,9 @@ class AAMBuilder(object):
                 if verbose:
                     print('Creating batch 1 - initial models '
                           'with {} images'.format(curr_batch_size))
-                data_prepare = self._prepare_data(
-                    image_batch, group=group, label=label,
-                    reference_shape=reference_shape, verbose=verbose)
+                data_prepare = self._prepare_data(image_batch, reference_shape,
+                                                  group=group, label=label,
+                                                  verbose=verbose)
                 for j, (warped_imgs, scaled_shapes) in enumerate(data_prepare):
                     s_app_model, s_shape_model = self._build_models(
                         warped_imgs, scaled_shapes, verbose=verbose)
@@ -105,8 +94,9 @@ class AAMBuilder(object):
               verbose=False):
         # compute reference shape
         if reference_shape is None:
-            reference_shape = self._compute_reference_shape(images, group,
-                                                            label, verbose)
+            reference_shape = compute_reference_shape(images, group, label,
+                                                      diagonal=self.diagonal,
+                                                      verbose=verbose)
 
         shape_models = []
         appearance_models = []
@@ -114,8 +104,8 @@ class AAMBuilder(object):
         if verbose:
             print_dynamic('Building models\n')
 
-        data_prepare = self._prepare_data(images, group=group, label=label,
-                                          reference_shape=reference_shape,
+        data_prepare = self._prepare_data(images, reference_shape,
+                                          group=group, label=label,
                                           verbose=verbose)
         for k, (warped_images, scaled_shapes) in enumerate(data_prepare):
             s_app_model, s_shape_model = self._build_models(warped_images,
@@ -138,9 +128,11 @@ class AAMBuilder(object):
                           label=None, app_forgetting_factor=1.0,
                           shape_forgetting_factor=1.0, verbose=False):
         curr_batch_size = len(image_batch)
+
         data_prepare = self._prepare_data(
-            image_batch, group=group, label=label,
-            reference_shape=reference_shape, verbose=verbose)
+            image_batch, reference_shape, group=group, label=label,
+            verbose=verbose)
+
         for j, (warped_imgs, scaled_shapes) in enumerate(data_prepare):
             if verbose:
                 print_dynamic(' - Incrementing Appearance Model with '
@@ -151,10 +143,10 @@ class AAMBuilder(object):
             if self.max_appearance_components is not None:
                 appearance_models[j].trim_components(
                     self.max_appearance_components)
+
             if verbose:
                 print_dynamic(' - Incrementing Shape Model with {} '
                               'shapes.'.format(curr_batch_size))
-
             # Before incrementing the shape model, we need to remove
             # similarity differences between the new shapes and the
             # model
@@ -175,45 +167,40 @@ class AAMBuilder(object):
     def _prepare_data(self, images, reference_shape, group=None, label=None,
                       verbose=False):
         # normalize images
-        images = self._normalize_images(images, group, label, reference_shape,
-                                        verbose)
+        images = normalize_images(images, group, label, reference_shape,
+                                  verbose, sigma=self.sigma)
         original_shapes = [i.landmarks[group][label] for i in images]
 
         # build models at each scale
         # for each pyramid level (high --> low)
         for j, s in enumerate(self.scales):
-            if verbose:
-                if len(self.scales) > 1:
-                    level_str = ' - Level {}: '.format(j)
-                else:
-                    level_str = ' - '
-
             # obtain image representation
             if j == 0:
                 # compute features at highest level
-                feature_images = self._compute_features(images, level_str,
-                                                        verbose)
+                feature_images = compute_features(images,
+                                                  verbose=verbose,
+                                                  features=self.features)
                 level_images = feature_images
             elif self.scale_features:
                 # scale features at other levels
-                level_images = self._scale_images(feature_images, s,
-                                                  level_str, verbose)
+                level_images = scale_images(feature_images, s,
+                                            verbose=verbose)
             else:
                 # scale images and compute features at other levels
-                scaled_images = self._scale_images(images, s, level_str,
-                                                   verbose)
-                level_images = self._compute_features(scaled_images,
-                                                      level_str, verbose)
+                scaled_images = scale_images(images, s, verbose=verbose)
+                level_images = compute_features(scaled_images, verbose=verbose,
+                                                features=self.features)
 
             # Rescaled shapes
             level_shapes = [i.landmarks[group][label] for i in level_images]
 
             # obtain warped images
-            scaled_ref_frame = UniformScale(s, reference_shape.n_dims).apply(reference_shape)
+            ref_frame_scale = UniformScale(s, reference_shape.n_dims)
+            scaled_ref_frame = ref_frame_scale.apply(reference_shape)
             self.current_scale = s
             warped_images = self._warp_images(level_images, level_shapes,
-                                              scaled_ref_frame, level_str,
-                                              verbose)
+                                              scaled_ref_frame,
+                                              verbose=verbose)
 
             if self.scale_shapes:
                 shape_model_shapes = level_shapes
@@ -225,122 +212,27 @@ class AAMBuilder(object):
     def _build_models(self, warped_images, scaled_shapes, verbose=False):
         if verbose:
             print_dynamic(' - Building shape model')
-        shape_model = self._build_shape_model(
+        shape_model = build_shape_model(
             scaled_shapes, self.max_shape_components)
 
         # obtain appearance model
         if verbose:
             print_dynamic(' - Building appearance model')
-        appearance_model = PCAModel(warped_images)
-        # trim appearance model if required
-        if self.max_appearance_components is not None:
-            appearance_model.trim_components(
-                self.max_appearance_components)
+        appearance_model = build_appearance_model(
+            warped_images, self.max_appearance_components)
 
         return appearance_model, shape_model
-
-    def _scale_shape_diagonal(self, ref_shape, diagonal):
-        x, y = ref_shape.range()
-        scale = diagonal / np.sqrt(x**2 + y**2)
-        return UniformScale(scale, ref_shape.n_dims).apply(ref_shape)
-
-    def _compute_reference_shape(self, images, group, label, verbose):
-        # the reference_shape is the mean shape of the images' landmarks
-        if verbose:
-            print_dynamic('- Computing reference shape')
-        shapes = [i.landmarks[group][label] for i in images]
-        ref_shape = mean_pointcloud(self._align_shapes(shapes))
-        # fix the reference_shape's diagonal length if specified
-        if self.diagonal:
-            ref_shape = self._scale_shape_diagonal(ref_shape, self.diagonal)
-        return ref_shape
-
-    def _normalize_images(self, images, group, label, ref_shape, verbose):
-        # normalize the scaling of all images wrt the reference_shape size
-        norm_images = []
-        for c, i in enumerate(images):
-            if verbose:
-                print_dynamic('- Normalizing images size: {}'.format(
-                    progress_bar_str((c + 1.) / len(images), show_bar=False)))
-            i = i.rescale_to_reference_shape(ref_shape, group=group,
-                                             label=label)
-            if self.sigma:
-                i.pixels = fsmooth(i.pixels, self.sigma)
-            norm_images.append(i)
-        return norm_images
-
-    def _compute_features(self, images, level_str, verbose):
-        feature_images = []
-        for c, i in enumerate(images):
-            if verbose:
-                print_dynamic(
-                    '{}Computing feature space: {}'.format(
-                        level_str, progress_bar_str((c + 1.) / len(images),
-                                                    show_bar=False)))
-            if self.features:
-                i = self.features(i)
-            feature_images.append(i)
-
-        return feature_images
-
-    @classmethod
-    def _scale_images(cls, images, s, level_str, verbose):
-        scaled_images = []
-        for c, i in enumerate(images):
-            if verbose:
-                print_dynamic(
-                    '{}Scaling features: {}'.format(
-                        level_str, progress_bar_str((c + 1.) / len(images),
-                                                    show_bar=False)))
-            scaled_images.append(i.rescale(s))
-        return scaled_images
-
-
-    @classmethod
-    def _align_shapes(cls, shapes):
-        centered_shapes = [Translation(-s.centre()).apply(s) for s in shapes]
-        # align centralized shape using Procrustes Analysis
-        gpa = GeneralizedProcrustesAnalysis(centered_shapes)
-        return [s.aligned_source() for s in gpa.transforms]
-
-    @classmethod
-    def _build_shape_model(cls, shapes, max_components):
-        r"""
-        Builds a shape model given a set of shapes.
-
-        Parameters
-        ----------
-        shapes: list of :map:`PointCloud`
-            The set of shapes from which to build the model.
-        max_components: None or int or float
-            Specifies the number of components of the trained shape model.
-            If int, it specifies the exact number of components to be retained.
-            If float, it specifies the percentage of variance to be retained.
-            If None, all the available components are kept (100% of variance).
-
-        Returns
-        -------
-        shape_model: :class:`menpo.model.pca`
-            The PCA shape model.
-        """
-        # build shape model
-        shape_model = PCAModel(cls._align_shapes(shapes))
-        if max_components is not None:
-            # trim shape model if required
-            shape_model.trim_components(max_components)
-
-        return shape_model
 
     @abc.abstractmethod
     def _build_aam(self, shape_models, appearance_models, reference_shape):
         pass
 
 
-# Concrete Implementations of AAM Builders ------------------------------------
+# Concrete Implementations of ATM Builders ------------------------------------
 
 class GlobalAAMBuilder(AAMBuilder):
 
-    def __init__(self, features=None, transform=DifferentiablePiecewiseAffine,
+    def __init__(self, features=no_op, transform=DifferentiablePiecewiseAffine,
                  trilist=None, diagonal=None, sigma=None, scales=(1, .5),
                  scale_shapes=True, scale_features=True,
                  max_shape_components=None, max_appearance_components=None,
@@ -362,7 +254,7 @@ class GlobalAAMBuilder(AAMBuilder):
         return build_reference_frame(mean_shape, boundary=self.boundary,
                                      trilist=self.trilist)
 
-    def _warp_images(self, images, shapes, ref_shape, level_str, verbose):
+    def _warp_images(self, images, shapes, ref_shape, verbose=True):
         # compute transforms
         ref_frame = self._build_reference_frame(ref_shape)
         # warp images to reference frame
@@ -371,8 +263,7 @@ class GlobalAAMBuilder(AAMBuilder):
                            ref_frame.landmarks['source'].lms)
         for c, (i, s) in enumerate(zip(images, shapes)):
             if verbose:
-                print_dynamic('{}Warping images - {}'.format(
-                    level_str,
+                print_dynamic(' - Warping images - {}'.format(
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
             # compute transforms
@@ -393,7 +284,7 @@ class GlobalAAMBuilder(AAMBuilder):
 
 class PatchAAMBuilder(AAMBuilder):
 
-    def __init__(self, patch_shape=(16, 16), features=None,
+    def __init__(self, patch_shape=(16, 16), features=no_op,
                  diagonal=None, sigma=None, scales=(1, .5), scale_shapes=True,
                  scale_features=True, max_shape_components=None,
                  max_appearance_components=None, boundary=3):
@@ -414,7 +305,7 @@ class PatchAAMBuilder(AAMBuilder):
         return build_patch_reference_frame(mean_shape, boundary=self.boundary,
                                            patch_shape=self.patch_shape)
 
-    def _warp_images(self, images, shapes, ref_shape, level_str, verbose):
+    def _warp_images(self, images, shapes, ref_shape, verbose=True):
         # compute transforms
         ref_frame = self._build_reference_frame(ref_shape)
         # warp images to reference frame
@@ -423,10 +314,9 @@ class PatchAAMBuilder(AAMBuilder):
                            ref_frame.landmarks['source'].lms)
         for c, (i, s) in enumerate(zip(images, shapes)):
             if verbose:
-                print_dynamic('{}Warping images - {}'.format(
-                    level_str,
-                    progress_bar_str(float(c + 1) / len(images),
-                                     show_bar=False)))
+                print_dynamic(' - Warping images - {}'.format(
+                              progress_bar_str(float(c + 1) / len(images),
+                                               show_bar=False)))
             # compute transforms
             t.set_target(s)
             # warp images
@@ -445,7 +335,7 @@ class PatchAAMBuilder(AAMBuilder):
 
 class LinearGlobalAAMBuilder(GlobalAAMBuilder):
 
-    def __init__(self, features=None, transform=DifferentiablePiecewiseAffine,
+    def __init__(self, features=no_op, transform=DifferentiablePiecewiseAffine,
                  trilist=None, diagonal=None, sigma=None, scales=(1, .5),
                  scale_shapes=False, scale_features=True,
                  max_shape_components=None, max_appearance_components=None,
@@ -470,8 +360,8 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
 
         return shape_model
 
-    def _warp_images(self, images, _, ref_shape, level_str, verbose):
-        from .base import _build_reference_frame
+    def _warp_images(self, images, _, ref_shape, verbose=True):
+        from ..builder import _build_reference_frame
 
         ref_frame = GlobalAAMBuilder._build_reference_frame(self, ref_shape)
         dense_landmarks = self.reference_frame.landmarks['source'].lms.copy()
@@ -488,8 +378,7 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
                            ref_frame.landmarks['source'].lms)
         for c, i in enumerate(images):
             if verbose:
-                print_dynamic('{}Warping images - {}'.format(
-                    level_str,
+                print_dynamic(' - Warping images - {}'.format(
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
             # compute transforms
@@ -513,7 +402,7 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
 
 class LinearPatchAAMBuilder(PatchAAMBuilder):
 
-    def __init__(self, patch_shape=(16, 16), features=None,
+    def __init__(self, patch_shape=(16, 16), features=no_op,
                  diagonal=None, sigma=None, scales=(1, .5), scale_shapes=False,
                  scale_features=True, max_shape_components=None,
                  max_appearance_components=None, boundary=3):
@@ -557,15 +446,13 @@ class LinearPatchAAMBuilder(PatchAAMBuilder):
 
         return shape_model
 
-    def _warp_images(self, images, shapes, reference_shape, level_str,
-                     verbose):
+    def _warp_images(self, images, shapes, reference_shape, verbose=True):
 
         # warp images to reference frame
         warped_images = []
         for c, (i, s) in enumerate(zip(images, shapes)):
             if verbose:
-                print_dynamic('{}Warping images - {}'.format(
-                    level_str,
+                print_dynamic(' - Warping images - {}'.format(
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
             # compute transforms
@@ -590,7 +477,7 @@ class LinearPatchAAMBuilder(PatchAAMBuilder):
 
 class PartsAAMBuilder(AAMBuilder):
 
-    def __init__(self, parts_shape=(16, 16), features=None,
+    def __init__(self, parts_shape=(16, 16), features=no_op,
                  normalize_parts=False, diagonal=None, sigma=None,
                  scales=(1, .5), scale_shapes=False, scale_features=True,
                  max_shape_components=None, max_appearance_components=None):
@@ -606,14 +493,13 @@ class PartsAAMBuilder(AAMBuilder):
         self.max_shape_components = max_shape_components
         self.max_appearance_components = max_appearance_components
 
-    def _warp_images(self, images, shapes, _, level_str, verbose):
+    def _warp_images(self, images, shapes, _, verbose=True):
 
         # extract parts
         parts_images = []
         for c, (i, s) in enumerate(zip(images, shapes)):
             if verbose:
-                print_dynamic('{}Warping images - {}'.format(
-                    level_str,
+                print_dynamic(' - Warping images - {}'.format(
                     progress_bar_str(float(c + 1) / len(images),
                                      show_bar=False)))
             parts_image = Image(i.extract_patches(

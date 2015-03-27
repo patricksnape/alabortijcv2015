@@ -10,7 +10,7 @@ from menpo.feature import gradient as fast_gradient
 from .result import AAMAlgorithmResult, LinearAAMAlgorithmResult
 
 
-# Abstract Interfaces for AAM Algorithms --------------------------------------
+# Abstract Interfaces for ATM Algorithms --------------------------------------
 
 class AAMInterface(object):
 
@@ -273,7 +273,7 @@ class PartsAAMInterface(AAMInterface):
             appearance_parameters=appearance_parameters, gt_shape=gt_shape)
 
 
-# Abstract Interfaces for AAM Algorithms  -------------------------------------
+# Abstract Interfaces for ATM Algorithms  -------------------------------------
 
 class AAMAlgorithm(object):
 
@@ -282,7 +282,7 @@ class AAMAlgorithm(object):
     def __init__(self, aam_interface, appearance_model, transform,
                  eps=10**-5, **kwargs):
 
-        # set common state for all AAM algorithms
+        # set common state for all ATM algorithms
         self.appearance_model = appearance_model
         self.template = appearance_model.mean()
         self.transform = transform
@@ -313,7 +313,7 @@ class ProjectOut(AAMAlgorithm):
         super(ProjectOut, self).__init__(
             aam_interface, appearance_model, transform, eps, **kwargs)
 
-        # set common state for all Project Out AAM algorithms
+        # set common state for all Project Out ATM algorithms
         self._masked_U = self._U[self.interface.image_vec_mask, :]
 
         # pre-compute
@@ -334,7 +334,7 @@ class Simultaneous(AAMAlgorithm):
         # set auxiliary template
         self.template2 = self.template.copy()
 
-        # set common state for all Fast Simultaneous AAM algorithms
+        # set common state for all Fast Simultaneous ATM algorithms
         self._masked_U = self._U[self.interface.image_vec_mask, :]
 
         # pre-compute
@@ -365,7 +365,7 @@ class Bayesian(AAMAlgorithm):
         super(Bayesian, self).__init__(
             aam_interface, appearance_model, transform, eps, **kwargs)
 
-        # set common state for all Bayesian AAM algorithms
+        # set common state for all Bayesian ATM algorithms
         self._U = self._U[self.interface.image_vec_mask, :]
         sigma2 = self.appearance_model.noise_variance()
         self._inv_sigma2 = 1 / sigma2
@@ -381,7 +381,7 @@ class Bayesian(AAMAlgorithm):
                     self._U.dot(A[..., None] * self._pinv_U.T.dot(j)))
 
 
-# Concrete implementations of AAM Algorithms  ---------------------------------
+# Concrete implementations of ATM Algorithms  ---------------------------------
 
 # Project Out Compositional Algorithms ----------------------------------------
 
@@ -1398,6 +1398,7 @@ class SBC(Simultaneous):
 
 
 # Alternating Compositional Algorithms ----------------------------------------
+
 
 class AIC(Alternating):
     r"""

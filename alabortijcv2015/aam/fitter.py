@@ -9,7 +9,7 @@ from .algorithm import (StandardAAMInterface, LinearAAMInterface,
 from .result import AAMFitterResult
 
 
-# Abstract Interface for AAM Fitters ------------------------------------------
+# Abstract Interface for ATM Fitters ------------------------------------------
 
 class AAMFitter(Fitter):
 
@@ -35,7 +35,7 @@ class AAMFitter(Fitter):
                                affine_correction, gt_shape=gt_shape)
 
 
-# Concrete Implementations of AAM Fitters -------------------------------------
+# Concrete Implementations of ATM Fitters -------------------------------------
 
 class StandardAAMFitter(AAMFitter):
 
