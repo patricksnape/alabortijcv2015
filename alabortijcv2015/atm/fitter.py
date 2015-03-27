@@ -133,10 +133,10 @@ class ATMFitter(Fitter):
 
         seq_algorithm_results = []
         shapes = seq_initial_shapes
+        print_dynamic('Beginning Fitting...'.format(j))
         for j, (ims, alg, it, s) in enumerate(zip(seq_images,
                                                   self._algorithms,
                                                   max_iters, self.scales)):
-            print_dynamic('Iteration {}'.format(j))
             if seq_gt_shapes:
                 gt_shapes = seq_gt_shapes[j]
             else:
@@ -154,6 +154,7 @@ class ATMFitter(Fitter):
                     Scale(self.scales[j + 1] / s,
                           n_dims=sh.n_dims).apply_inplace(sh)
                     shapes.append(sh)
+            print_dynamic('Finished Scale {}'.format(j))
 
         return [r for r in zip(*seq_algorithm_results)]
 
