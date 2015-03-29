@@ -184,6 +184,23 @@ class LinearATMInterface(StandardATMInterface):
 
         return dp
 
+    def seq_solve(self, h, j, es, jps, prior):
+        if prior:
+            raise NotImplementedError('Maybe we want different priors per '
+                                      'frame?')
+            # t = self.algorithm.transform
+            # inv_h = np.linalg.inv(h)
+            # dp = inv_h.dot(j.T.dot(e))
+            # dp = -np.linalg.solve(t.h_prior + jp.dot(inv_h.dot(jp.T)),
+            #                       t.j_prior * t.as_vector() - jp.dot(dp))
+        else:
+            block_es = block_diag([e for e in es.T]).T
+            # Make sure the dot product is sparse
+            res = block_es.T.dot(j).T
+            dp = np.linalg.solve(h, res)
+
+        return dp
+
     def algorithm_result(self, image, shape_parameters, cost,
                          appearance_parameters=None, gt_shape=None):
         return LinearATMAlgorithmResult(
@@ -327,7 +344,8 @@ class SequenceTAIC(ATMAlgorithm):
 
                 # compute error image
                 es.append(self.vec_template - masked_i)
-                jps.append(self.transform.jp())
+                if hasattr(self.transform, 'jp'):
+                    jps.append(self.transform.jp())
 
             es = np.vstack(es).T
             # compute gauss-newton parameter updates
