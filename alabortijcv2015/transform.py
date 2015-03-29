@@ -403,33 +403,33 @@ class OrthoMDTransform(GlobalMDTransform):
 
 class OrthoLinearMDTransform(OrthoPDM, Transform):
 
-    def __init__(self, model, n_landmarks, sigma2=1):
+    def __init__(self, model, sigma2=1):
         super(OrthoLinearMDTransform, self).__init__(model, sigma2)
-        self.n_landmarks = n_landmarks
 
         self.W = np.vstack((self.similarity_model.components,
                             self.model.components))
-        if self.n_landmarks:
-            V = self.W[:, :self.n_dims*self.n_landmarks]
-            self.pinv_V = np.linalg.pinv(V)
+        # if self.n_landmarks:
+        #     V = self.W[:, :self.n_dims*self.n_landmarks]
+        #     self.pinv_V = np.linalg.pinv(V)
 
     @property
     def dense_target(self):
-        return PointCloud(self.target.points[self.n_landmarks:])
+        return PointCloud(self.target.points)
 
     @property
     def sparse_target(self):
-        return PointCloud(self.target.points[:self.n_landmarks])
+        raise NotImplementedError('Use landmark mask.')
+        #return PointCloud(self.target.points)
 
     def set_target(self, target):
-        if self.n_landmarks and target.n_points == self.n_landmarks:
-            # densify target
-            target = np.dot(np.dot(target.as_vector(), self.pinv_V), self.W)
-            target = PointCloud(np.reshape(target, (-1, self.n_dims)))
+        # if self.n_landmarks and target.n_points == self.n_landmarks:
+        #     # densify target
+        #     target = np.dot(np.dot(target.as_vector(), self.pinv_V), self.W)
+        #     target = PointCloud(np.reshape(target, (-1, self.n_dims)))
         OrthoPDM.set_target(self, target)
 
     def _apply(self, _, **kwargs):
-        return self.target.points[self.n_landmarks:]
+        return self.target.points
 
     def d_dp(self, _):
-        return OrthoPDM.d_dp(self, _)[self.n_landmarks:, ...]
+        return OrthoPDM.d_dp(self, _)

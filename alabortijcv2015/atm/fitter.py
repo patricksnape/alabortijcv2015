@@ -4,8 +4,9 @@ from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
 
 from .algorithm import StandardATMInterface, LinearATMInterface, TAIC
-from menpo.transform import Scale, AlignmentAffine
+from menpo.transform import Scale, AlignmentAffine, UniformScale
 from menpo.visualize import print_dynamic
+from menpo.shape import PointCloud
 from .result import ATMFitterResult
 
 
@@ -196,12 +197,86 @@ class LinearATMFitter(ATMFitter):
         self._algorithms = []
         self._check_n_shape(n_shape)
 
-        for j, (template, sm) in enumerate(zip(self.dm.appearance_models,
-                                               self.dm.templates)):
+        for j, (template, sm) in enumerate(zip(self.dm.templates,
+                                               self.dm.shape_models)):
             md_transform = OrthoLinearMDTransform(
-                sm, self.dm.n_landmarks)
+                sm)
 
             algorithm = algorithm_cls(LinearATMInterface, template,
                                       md_transform, **kwargs)
 
             self._algorithms.append(algorithm)
+
+    def _fit(self, images, initial_shape, gt_shapes=None, max_iters=50,
+             **kwargs):
+        r"""
+        Fits the algorithm to the multilevel pyramidal images.
+
+        Parameters
+        -----------
+        images: :class:`menpo.image.masked.MaskedImage` list
+            The images to be fitted.
+        initial_shape: :class:`menpo.shape.PointCloud`
+            The initial shape from which the fitting will start.
+        gt_shapes: :class:`menpo.shape.PointCloud` list, optional
+            The original ground truth shapes associated to the multilevel
+            images.
+
+            Default: None
+        max_iters: int or list, optional
+            The maximum number of iterations.
+            If int, then this will be the overall maximum number of iterations
+            for all the pyramidal levels.
+            If list, then a maximum number of iterations is specified for each
+            pyramidal level.
+
+            Default: 50
+
+        Returns
+        -------
+        algorithm_results: :class:`menpo.fg2015.fittingresult.FittingResult` list
+            The fitting object containing the state of the whole fitting
+            procedure.
+        """
+
+        max_iters = self._prepare_max_iters(max_iters)
+
+        shape = initial_shape
+        gt_shape = None
+        algorithm_results = []
+        for j, (i, alg, it, s) in enumerate(zip(images, self._algorithms,
+                                                max_iters, self.scales)):
+            if gt_shapes:
+                gt_shape = gt_shapes[j]
+
+            algorithm_result = alg.run(i, shape, gt_shape=gt_shape,
+                                       max_iters=it, **kwargs)
+            algorithm_results.append(algorithm_result)
+
+            shape = algorithm_result.final_shape
+            if s != self.scales[-1]:
+                # Create an image from the final shape for interpolation
+                current_shape_im = self.dm.reference_frames[j].from_vector(
+                    shape.points.T.ravel(), n_channels=2)
+                # TODO: lazily 'zoom' into the image to stop interpolation
+                # issues at the boundaries. Really the image should have a
+                # mask that is slightly too small to deal with this, or
+                # model based interpolation should be performed using the
+                # next shape model
+                current_shape_im = current_shape_im.zoom(1.02)
+                # Warp the image up to interpolate
+                current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
+                    self.dm.reference_frames[j + 1].mask,
+                    UniformScale(s, 2))
+                # Back to pointcloud.
+                shape = PointCloud(current_shape_im.as_vector(
+                    keep_channels=True).T)
+                # But the values haven't changed! So we scale them as well.
+                UniformScale(1.0 / s, 2).apply_inplace(shape)
+
+        return algorithm_results
+
+    @property
+    def reference_shape(self):
+        return PointCloud(self.dm.reference_frames[0].as_vector(
+            keep_channels=True).T)

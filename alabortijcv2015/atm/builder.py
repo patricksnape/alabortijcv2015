@@ -1,14 +1,18 @@
 from __future__ import division
+import numpy as np
+from itertools import chain
 
-from menpo.transform import Translation, UniformScale
-from menpo.visualize import print_dynamic, progress_bar_str
+from menpo.transform import UniformScale, AlignmentSimilarity
+from menpo.visualize import print_dynamic
 from menpo.feature import no_op
+from menpo.shape import PointCloud, TriMesh
+from menpo.image import MaskedImage
 from menpofit.transform import DifferentiablePiecewiseAffine
 
 from ..builder import \
     compute_features, scale_images, \
     build_shape_model, build_reference_frame, \
-    compute_reference_shape_from_shapes
+    compute_reference_shape_from_shapes, scale_shape_diagonal
 
 # Abstract Interface for ATM Builders -----------------------------------------
 
@@ -16,8 +20,7 @@ from ..builder import \
 class ATMBuilder(object):
 
     def build(self, template, shapes, group=None, label=None,
-              reference_shape=None,
-              verbose=False):
+              reference_shape=None, verbose=False):
         # compute reference shape
         if reference_shape is None:
             reference_shape = compute_reference_shape_from_shapes(
@@ -116,8 +119,7 @@ class GlobalATMBuilder(ATMBuilder):
         self.boundary = boundary
 
     def _build_reference_frame(self, mean_shape):
-        return build_reference_frame(mean_shape, boundary=self.boundary,
-                                     trilist=self.trilist)
+        return build_reference_frame(mean_shape, boundary=self.boundary)
 
     def _warp_template(self, template, ref_shape, group=None,
                        label=None, verbose=True):
@@ -145,68 +147,181 @@ class GlobalATMBuilder(ATMBuilder):
 
 class LinearGlobalATMBuilder(GlobalATMBuilder):
 
-    def __init__(self, features=no_op, transform=DifferentiablePiecewiseAffine,
-                 trilist=None, diagonal=None, sigma=None, scales=(1, .5),
-                 scale_shapes=False, scale_features=True,
-                 max_shape_components=None, max_appearance_components=None,
+    def __init__(self, features=no_op, trilist=None, diagonal=None, sigma=None,
+                 scales=(1, .5), scale_features=True, max_shape_components=None,
                  boundary=3):
 
         self.features = features
-        self.transform = transform
         self.trilist = trilist
         self.diagonal = diagonal
         self.sigma = sigma
         self.scales = list(scales)
-        self.scale_shapes = scale_shapes
         self.scale_features = scale_features
         self.max_shape_components = max_shape_components
-        self.max_appearance_components = max_appearance_components
         self.boundary = boundary
 
-    def _build_shape_model(self, shapes, max_components):
+    def build(self, template, uv_images, group=None, label=None, verbose=False,
+              sparse_landmarks_mask=None):
+        # uv_images is a list of tuples, (u, v) where u and v are multichannel
+        # images where each channel is a shape in the sequence
+        # We assume that the UV flow images are already all in the same
+        # reference frame, as they have been learnt from a given reference
+        # frame. We also assume that all the flow images are masked.
+        reference_shape = zero_flow_grid_pcloud(uv_images[0][0].shape,
+                                                triangulated=False,
+                                                mask=uv_images[0][0].mask)
+        if self.diagonal:
+            reference_shape = scale_shape_diagonal(reference_shape,
+                                                   self.diagonal)
 
-        shape_model = GlobalATMBuilder._build_shape_model(
-            shapes, max_components)
+        shape_models = []
+        templates = []
+        reference_frames = []
 
-        return shape_model
+        if verbose:
+            print_dynamic('Building models\n')
 
-    def _warp_images(self, images, _, ref_shape, verbose=True):
-        from ..builder import _build_reference_frame
-
-        ref_frame = GlobalATMBuilder._build_reference_frame(self, ref_shape)
-        dense_landmarks = self.reference_frame.landmarks['source'].lms.copy()
-        trans = Translation(-dense_landmarks.centre())
-        trans = trans.compose_before(UniformScale(self.current_scale,
-                                                  ref_shape.n_dims))
-        scaled_source = _build_reference_frame(
-            trans.apply(dense_landmarks),
-            boundary=self.boundary).landmarks['source'].lms
-
-        # warp images to reference frame
-        warped_images = []
-        t = self.transform(ref_frame.landmarks['source'].lms,
-                           ref_frame.landmarks['source'].lms)
-        for c, i in enumerate(images):
+        data_prepare = self._prepare_data(template, uv_images, reference_shape,
+                                          group=group, label=label,
+                                          verbose=verbose)
+        for k, (lvl_tmplt, lvl_shapes, lvl_refframe) in enumerate(data_prepare):
             if verbose:
-                print_dynamic('Warping images - {}'.format(
-                    progress_bar_str(float(c + 1) / len(images),
-                                     show_bar=False)))
-            # compute transforms
-            t.set_target(i.landmarks[None].lms)
-            # warp images
-            warped_i = i.warp_to_mask(ref_frame.mask, t)
-            # attach reference frame landmarks to images
-            warped_i.landmarks['source'] = scaled_source
-            warped_images.append(warped_i)
-        return warped_images
+                print_dynamic(' - Building shape model')
+            s_shape_model = build_shape_model(
+                lvl_shapes, self.max_shape_components)
+            shape_models.append(s_shape_model)
 
-    def _build_aam(self, shape_models, appearance_models, reference_shape):
+            warped_template = self._warp_template(lvl_tmplt, lvl_refframe)
+            templates.append(warped_template)
+            reference_frames.append(lvl_refframe)
+
+            if verbose:
+                print_dynamic(' - Level {} - Done\n'.format(k))
+
+        # reverse the list of shape and appearance models so that they are
+        # ordered from lower to higher resolution
+        shape_models.reverse()
+        templates.reverse()
+        reference_frames.reverse()
+
+        return self._build_atm(shape_models, templates, reference_frames)
+
+    def _prepare_data(self, template, uv_images, reference_shape,
+                      group=None, label=None, verbose=False):
+        normalized_template = template.rescale_to_reference_shape(
+            reference_shape, group=group, label=label)
+
+        # build models at each scale
+        # for each pyramid level (high --> low)
+        for j, s in enumerate(self.scales):
+            # obtain image representation
+            if j == 0:
+                # compute features at highest level
+                feature_image = compute_features([normalized_template],
+                                                 verbose=verbose,
+                                                 features=self.features)[0]
+                level_template = feature_image
+            elif self.scale_features:
+                # scale features at other levels
+                level_template = scale_images([feature_image], s,
+                                              verbose=verbose)[0]
+            else:
+                # scale images and compute features at other levels
+                scaled_image = scale_images([normalized_template], s,
+                                            verbose=verbose)[0]
+                level_template = compute_features([scaled_image],
+                                                  verbose=verbose,
+                                                  features=self.features)[0]
+
+            # Rescaled shapes
+            uv_list = list(chain(*zip(*uv_images)))
+            level_uvs = scale_images(uv_list, s, verbose=verbose)
+            half_list = len(uv_list) // 2
+            level_shapes = []
+            for u, v in zip(level_uvs[:half_list], level_uvs[half_list:]):
+                level_shapes.append(pointclouds_from_uv(u, v))
+            level_shapes = list(chain(*level_shapes))
+
+            level_tmplt = level_uvs[0]
+            level_ref_frame = self._build_reference_frame(level_tmplt)
+            zero_flow = PointCloud(level_ref_frame.as_vector(
+                keep_channels=True).T)
+
+            for ls in level_shapes:
+                AlignmentSimilarity(ls, zero_flow).apply_inplace(ls)
+
+            yield level_template, level_shapes, level_ref_frame
+
+    def _build_reference_frame(self, template_im):
+        zero_flow = zero_flow_grid_pcloud(template_im.shape,
+                                          mask=template_im.mask)
+        ref_frame = MaskedImage.init_blank(template_im.shape,
+                                           mask=template_im.mask,
+                                           n_channels=2)
+        ref_frame.from_vector_inplace(zero_flow.points.T.ravel())
+        return ref_frame
+
+    def _warp_template(self, template, ref_frame, group=None,
+                       label=None, verbose=True):
+        if verbose:
+            print_dynamic(' - Warping template')
+
+        sample_points = ref_frame.as_vector(keep_channels=True).T
+        warped_template = ref_frame.from_vector(
+            template.sample(sample_points),
+            n_channels=template.n_channels)
+        warped_template.landmarks['source'] = PointCloud(sample_points)
+
+        return warped_template
+
+    def _build_atm(self, shape_models, templates, reference_frames):
         from alabortijcv2015.atm import LinearGlobalATM
 
-        return LinearGlobalATM(shape_models, appearance_models,
-                               self.reference_frame.landmarks['source'].lms,
-                               self.transform,
+        return LinearGlobalATM(shape_models, templates,
+                               reference_frames,
                                self.features, self.sigma,
                                list(reversed(self.scales)),
-                               self.scale_shapes, self.scale_features,
-                               0)
+                               True, self.scale_features)
+
+
+def pointclouds_from_uv(u, v):
+    return [PointCloud(np.vstack([v1, u1]).T)
+            for u1, v1 in zip(u.as_vector(keep_channels=True),
+                              v.as_vector(keep_channels=True))]
+
+
+def grid_triangulation(shape):
+    height, width = shape
+    row_to_index = lambda x: x * width
+    top_triangles = lambda x: np.concatenate([np.arange(row_to_index(x), row_to_index(x) + width - 1)[..., None],
+                                              np.arange(row_to_index(x) + 1, row_to_index(x) + width)[..., None],
+                                              np.arange(row_to_index(x + 1), row_to_index(x + 1) + width - 1)[..., None]], axis=1)
+
+    # Half edges are opposite directions
+    bottom_triangles = lambda x: np.concatenate([np.arange(row_to_index(x + 1), row_to_index(x + 1) + width - 1)[..., None],
+                                                 np.arange(row_to_index(x) + 1, row_to_index(x) + width)[..., None],
+                                                 np.arange(row_to_index(x + 1) + 1, row_to_index(x + 1) + width)[..., None]], axis=1)
+
+    trilist = []
+    for k in xrange(height - 1):
+        trilist.append(top_triangles(k))
+        trilist.append(bottom_triangles(k))
+
+    return np.concatenate(trilist)
+
+
+def zero_flow_grid_pcloud(shape, triangulated=False, mask=None):
+    point_grid = np.meshgrid(range(0, shape[0]),
+                             range(0, shape[1]), indexing='ij')
+    point_grid_vec = np.vstack([p.ravel() for p in point_grid]).T
+
+    if triangulated:
+        trilist = grid_triangulation(shape)
+        pcloud = TriMesh(point_grid_vec, trilist=trilist)
+    else:
+        pcloud = PointCloud(point_grid_vec)
+
+    if mask is not None:
+        return pcloud.from_mask(mask.pixels.ravel())
+    else:
+        return pcloud

@@ -148,7 +148,7 @@ def build_appearance_model(images, max_components):
 
 
 def build_reference_frame(landmarks, boundary=3, group='source',
-                          trilist=None):
+                          point_in_pointcloud='convex_hull'):
     r"""
     Builds a reference frame from a particular set of landmarks.
 
@@ -156,21 +156,13 @@ def build_reference_frame(landmarks, boundary=3, group='source',
     ----------
     landmarks : :map:`PointCloud`
         The landmarks that will be used to build the reference frame.
-
     boundary : `int`, optional
         The number of pixels to be left as a safe margin on the boundaries
         of the reference frame (has potential effects on the gradient
         computation).
-
     group : `string`, optional
         Group that will be assigned to the provided set of landmarks on the
         reference frame.
-
-    trilist : ``(t, 3)`` `ndarray`, optional
-        Triangle list that will be used to build the reference frame.
-
-        If ``None``, defaults to performing Delaunay triangulation on the
-        points.
 
     Returns
     -------
@@ -179,14 +171,9 @@ def build_reference_frame(landmarks, boundary=3, group='source',
     """
     reference_frame = _build_reference_frame(landmarks, boundary=boundary,
                                              group=group)
-    if trilist is not None:
-        reference_frame.landmarks[group] = TriMesh(
-            reference_frame.landmarks['source'].lms.points, trilist=trilist)
 
-    # TODO: revise kwarg trilist in method constrain_mask_to_landmarks,
-    # perhaps the trilist should be directly obtained from the group landmarks
     reference_frame.constrain_mask_to_landmarks(
-        group=group)
+        group=group, point_in_pointcloud=point_in_pointcloud)
 
     return reference_frame
 

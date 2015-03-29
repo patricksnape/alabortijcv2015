@@ -60,8 +60,6 @@ class StandardATMInterface(ATMInterface):
         self.gradient2_mask = np.nonzero(np.tile(
             sampling_mask[None, None, None, ...], (2, 2, n_channels, 1)))
 
-        # self.eigenvalues = self.algorithm.transform.pdm.model.eigenvalues
-
     def dw_dp(self):
         dw_dp = np.rollaxis(self.algorithm.transform.d_dp(
             self.algorithm.template.mask.true_indices()), -1)

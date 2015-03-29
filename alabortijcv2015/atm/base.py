@@ -1,11 +1,13 @@
 from __future__ import division
 import numpy as np
 
-from menpo.shape import TriMesh
+from menpo.shape import PointCloud
 from alabortijcv2015.builder import build_reference_frame
 
 
 # Abstract Interface for ATM Objects ------------------------------------------
+from menpo.image import MaskedImage
+
 
 class ATM(object):
 
@@ -93,7 +95,7 @@ class GlobalATM(ATM):
         landmarks = template.landmarks['source'].lms
 
         reference_frame = self._build_reference_frame(
-            shape_instance, landmarks)
+            shape_instance)
 
         transform = self.transform(
             reference_frame.landmarks['source'].lms, landmarks)
@@ -104,49 +106,40 @@ class GlobalATM(ATM):
 
         return instance
 
-    def _build_reference_frame(self, reference_shape, landmarks):
-        if type(landmarks) == TriMesh:
-            trilist = landmarks.trilist
-        else:
-            trilist = None
-        return build_reference_frame(reference_shape, trilist=trilist)
+    def _build_reference_frame(self, reference_shape):
+        return build_reference_frame(reference_shape)
 
 
 class LinearGlobalATM(ATM):
 
-    def __init__(self, shape_models, templates, reference_shape,
-                 transform, features, sigma, scales, scale_shapes,
-                 scale_features, n_landmarks):
+    def __init__(self, shape_models, templates, reference_frames,
+                 features, sigma, scales, scale_features, n_landmarks):
 
         self.shape_models = shape_models
         self.templates = templates
-        self.transform = transform
         self.features = features
-        self.reference_shape = reference_shape
+        self.reference_frames = reference_frames
         self.sigma = sigma
         self.scales = scales
-        self.scale_shapes = scale_shapes
         self.scale_features = scale_features
         self.n_landmarks = n_landmarks
 
     def _instance(self, level, shape_instance, template):
-        landmarks = template.landmarks['source'].lms
+        from .builder import zero_flow_grid_pcloud
+        #landmarks = template.landmarks['source'].lms
 
-        reference_frame = self._build_reference_frame(
-            shape_instance, landmarks)
+        ref_frame = self.reference_frames[level]
 
-        transform = self.transform(
-            reference_frame.landmarks['source'].lms, landmarks)
+        warped_template = MaskedImage.init_blank(ref_frame.shape,
+                                                 mask=ref_frame.mask,
+                                                 n_channels=template.n_channels)
+        warped_template.from_vector_inplace(
+            template.as_unmasked().sample(shape_instance.points).ravel())
+        warped_template.landmarks['source'] = shape_instance
 
-        instance = template.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform, batch_size=3000)
-        instance.landmarks = reference_frame.landmarks
+        return warped_template
 
-        return instance
-
-    def _build_reference_frame(self, reference_shape, landmarks):
-        if type(landmarks) == TriMesh:
-            trilist = landmarks.trilist
-        else:
-            trilist = None
-        return build_reference_frame(reference_shape, trilist=trilist)
+    @property
+    def reference_shape(self):
+        return PointCloud(self.reference_frames[0].as_vector(
+            keep_channels=True).T)
