@@ -2,6 +2,9 @@ from __future__ import division
 import numpy as np
 from itertools import chain
 
+
+from scipy.spatial.kdtree import KDTree
+
 from menpo.transform import UniformScale, AlignmentSimilarity
 from menpo.visualize import print_dynamic
 from menpo.feature import no_op
@@ -160,8 +163,13 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
         self.max_shape_components = max_shape_components
         self.boundary = boundary
 
-    def build(self, template, uv_images, group=None, label=None, verbose=False,
-              sparse_landmarks_mask=None):
+    def build(self, template, uv_images, group=None, group_sparse=None,
+              verbose=False):
+        if group is None and group_sparse is not None:
+            raise ValueError('Cannot use None for the group key because '
+                             'two landmark groups are required on the '
+                             'template for both the sparse and dense '
+                             'landmarks.')
         # uv_images is a list of tuples, (u, v) where u and v are multichannel
         # images where each channel is a shape in the sequence
         # We assume that the UV flow images are already all in the same
@@ -177,12 +185,14 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
         shape_models = []
         templates = []
         reference_frames = []
+        dense_indices = []
+        sparse_masks = []
 
         if verbose:
             print_dynamic('Building models\n')
 
         data_prepare = self._prepare_data(template, uv_images, reference_shape,
-                                          group=group, label=label,
+                                          group=group,
                                           verbose=verbose)
         for k, (lvl_tmplt, lvl_shapes, lvl_refframe) in enumerate(data_prepare):
             if verbose:
@@ -195,6 +205,14 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
             templates.append(warped_template)
             reference_frames.append(lvl_refframe)
 
+            if group_sparse is not None:
+                zero_flow = PointCloud(lvl_refframe.as_vector(
+                    keep_channels=True).T)
+                dense_ind, sparse_mask = sparse_landmark_indices_from_dense(
+                    zero_flow, lvl_tmplt.landmarks[group_sparse].lms)
+                dense_indices.append(dense_ind)
+                sparse_masks.append(sparse_mask)
+
             if verbose:
                 print_dynamic(' - Level {} - Done\n'.format(k))
 
@@ -203,13 +221,17 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
         shape_models.reverse()
         templates.reverse()
         reference_frames.reverse()
+        dense_indices.reverse()
+        sparse_masks.reverse()
 
-        return self._build_atm(shape_models, templates, reference_frames)
+        return self._build_atm(shape_models, templates, reference_frames,
+                               dense_indices=dense_indices,
+                               sparse_masks=sparse_masks)
 
     def _prepare_data(self, template, uv_images, reference_shape,
-                      group=None, label=None, verbose=False):
+                      group=None, verbose=False):
         normalized_template = template.rescale_to_reference_shape(
-            reference_shape, group=group, label=label)
+            reference_shape, group=group)
 
         # build models at each scale
         # for each pyramid level (high --> low)
@@ -233,20 +255,24 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
                                                   verbose=verbose,
                                                   features=self.features)[0]
 
-            # Rescaled shapes
+            # Flatten list of tuples (all us, all vs)
             uv_list = list(chain(*zip(*uv_images)))
             level_uvs = scale_images(uv_list, s, verbose=verbose)
             half_list = len(uv_list) // 2
+            # Scaled UV images to pointclouds
             level_shapes = []
             for u, v in zip(level_uvs[:half_list], level_uvs[half_list:]):
                 level_shapes.append(pointclouds_from_uv(u, v))
+            # Flatten list
             level_shapes = list(chain(*level_shapes))
 
+            # Build a reference frame from the scaled mask
             level_tmplt = level_uvs[0]
             level_ref_frame = self._build_reference_frame(level_tmplt)
             zero_flow = PointCloud(level_ref_frame.as_vector(
                 keep_channels=True).T)
 
+            # Make sure the scale of the pointclouds is correct to the new frame
             for ls in level_shapes:
                 AlignmentSimilarity(ls, zero_flow).apply_inplace(ls)
 
@@ -274,14 +300,17 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
 
         return warped_template
 
-    def _build_atm(self, shape_models, templates, reference_frames):
+    def _build_atm(self, shape_models, templates, reference_frames,
+                   dense_indices=None, sparse_masks=None):
         from alabortijcv2015.atm import LinearGlobalATM
 
         return LinearGlobalATM(shape_models, templates,
                                reference_frames,
                                self.features, self.sigma,
                                list(reversed(self.scales)),
-                               True, self.scale_features)
+                               self.scale_features,
+                               dense_indices=dense_indices,
+                               sparse_masks=sparse_masks)
 
 
 def pointclouds_from_uv(u, v):
@@ -325,3 +354,21 @@ def zero_flow_grid_pcloud(shape, triangulated=False, mask=None):
         return pcloud.from_mask(mask.pixels.ravel())
     else:
         return pcloud
+
+
+def sparse_landmark_indices_from_dense(dense_landmarks, sparse_lmarks):
+    points = dense_landmarks.points
+
+    tree = KDTree(points)
+
+    indices = np.array([tree.query(p)[1] for p in sparse_lmarks.points])
+    sparse_landmark_mask = np.zeros_like(indices, dtype=np.bool)
+    uniq_indices_set = set()
+    uniq_indices_list = []
+    for k, i in enumerate(indices):
+        if i not in uniq_indices_set:
+            uniq_indices_set.add(i)
+            uniq_indices_list.append(i)
+            sparse_landmark_mask[k] = i
+
+    return np.array(uniq_indices_list), sparse_landmark_mask

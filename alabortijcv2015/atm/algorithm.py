@@ -202,7 +202,7 @@ class LinearATMInterface(StandardATMInterface):
         return dp
 
     def algorithm_result(self, image, shape_parameters, cost,
-                         appearance_parameters=None, gt_shape=None):
+                         gt_shape=None):
         return LinearATMAlgorithmResult(
             image, self.algorithm, shape_parameters, cost,
             gt_shape=gt_shape)

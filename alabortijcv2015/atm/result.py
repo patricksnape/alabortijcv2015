@@ -40,21 +40,37 @@ class LinearATMAlgorithmResult(ATMAlgorithmResult):
             image, fitter, shape_parameters, cost,
             gt_shape=gt_shape)
 
-    def shapes(self, as_points=False):
+    def shapes(self, as_points=False, sparse=True):
         if as_points:
-            return [self.fitter.transform.from_vector(p).dense_target.points
-                    for p in self.shape_parameters]
+            if sparse:
+                return [self.fitter.transform.from_vector(p).sparse_target.points
+                        for p in self.shape_parameters]
+            else:
+                return [self.fitter.transform.from_vector(p).dense_target.points
+                        for p in self.shape_parameters]
 
         else:
-            return [self.fitter.transform.from_vector(p).dense_target
-                    for p in self.shape_parameters]
+            if sparse:
+                return [self.fitter.transform.from_vector(p).sparse_target
+                        for p in self.shape_parameters]
+            else:
+                return [self.fitter.transform.from_vector(p).dense_target
+                        for p in self.shape_parameters]
 
     @property
     def final_shape(self):
+        return self.final_transform.sparse_target
+
+    @property
+    def final_dense_shape(self):
         return self.final_transform.dense_target
 
     @property
     def initial_shape(self):
+        return self.initial_transform.sparse_target
+
+    @property
+    def initial_dense_shape(self):
         return self.initial_transform.dense_target
 
 

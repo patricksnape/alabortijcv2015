@@ -4,9 +4,11 @@ from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
 
 from .algorithm import StandardATMInterface, LinearATMInterface, TAIC
-from menpo.transform import Scale, AlignmentAffine, UniformScale
+from menpo.transform import (Scale, AlignmentAffine, UniformScale,
+                             AlignmentSimilarity)
 from menpo.visualize import print_dynamic
 from menpo.shape import PointCloud
+from menpofit.base import noisy_align
 from .result import ATMFitterResult
 
 
@@ -200,7 +202,8 @@ class LinearATMFitter(ATMFitter):
         for j, (template, sm) in enumerate(zip(self.dm.templates,
                                                self.dm.shape_models)):
             md_transform = OrthoLinearMDTransform(
-                sm)
+                sm, dense_indices=self.dm.dense_indices[j],
+                sparse_mask=self.dm.sparse_masks[j])
 
             algorithm = algorithm_cls(LinearATMInterface, template,
                                       md_transform, **kwargs)
@@ -247,17 +250,24 @@ class LinearATMFitter(ATMFitter):
         for j, (i, alg, it, s) in enumerate(zip(images, self._algorithms,
                                                 max_iters, self.scales)):
             if gt_shapes:
-                gt_shape = gt_shapes[j]
+                gt_shape = self._mask_gt_shape(alg, gt_shapes[j])
 
             algorithm_result = alg.run(i, shape, gt_shape=gt_shape,
                                        max_iters=it, **kwargs)
             algorithm_results.append(algorithm_result)
 
-            shape = algorithm_result.final_shape
+            shape = algorithm_result.final_dense_shape
             if s != self.scales[-1]:
                 shape = self._interpolate_shape(shape, j, s)
 
         return algorithm_results
+
+    def _mask_gt_shape(self, alg, gt_shape):
+        if alg.transform.sparse_mask is not None:
+            # Assume the GT is sparse
+            if gt_shape.n_points < alg.transform.dense_target.n_points:
+                gt_shape = gt_shape.from_mask(alg.transform.sparse_mask)
+        return gt_shape
 
     def _fit_sequence(self, seq_images, seq_initial_shapes, seq_gt_shapes=None,
                       max_iters=50, **kwargs):
@@ -309,7 +319,7 @@ class LinearATMFitter(ATMFitter):
             if s != self.scales[-1]:
                 shapes = []
                 for alg in algorithm_results:
-                    sh = self._interpolate_shape(alg.final_shape, j, s)
+                    sh = self._interpolate_shape(alg.final_dense_shape, j, s)
                     shapes.append(sh)
             print_dynamic('Finished Scale {}'.format(j))
 
@@ -340,3 +350,43 @@ class LinearATMFitter(ATMFitter):
     def reference_shape(self):
         return PointCloud(self.dm.reference_frames[0].as_vector(
             keep_channels=True).T)
+
+    def perturb_sparse_shape(self, gt_shape, noise_std=0.04, rotation=False):
+        r"""
+        Generates an initial shape by adding gaussian noise to the perfect
+        similarity alignment between the ground truth and reference_shape.
+
+        Parameters
+        -----------
+        gt_shape: :class:`menpo.shape.PointCloud`
+            The ground truth shape.
+        noise_std: float, optional
+            The standard deviation of the gaussian noise used to produce the
+            initial shape.
+
+            Default: 0.04
+        rotation: boolean, optional
+            Specifies whether ground truth in-plane rotation is to be used
+            to produce the initial shape.
+
+            Default: False
+
+        Returns
+        -------
+        initial_shape: :class:`menpo.shape.PointCloud`
+            The initial shape.
+        """
+        reference_shape = self.reference_shape
+        transform = self._algorithms[0].transform
+        gt_to_m = AlignmentSimilarity(gt_shape.from_mask(transform.sparse_mask),
+                                      transform.sparse_target)
+        transform.set_target(gt_to_m.apply(gt_shape))
+        scaled_target = gt_to_m.pseudoinverse().apply(transform.dense_target)
+        return noisy_align(reference_shape, scaled_target,
+                           noise_std=noise_std,
+                           rotation=rotation).apply(reference_shape)
+
+    def _fitter_result(self, image, algorithm_results, affine_correction,
+                       gt_shape=None):
+        return ATMFitterResult(image, self, algorithm_results,
+                               affine_correction, gt_shape=gt_shape)

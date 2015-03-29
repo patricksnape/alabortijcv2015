@@ -11,56 +11,6 @@ from menpofit.fitter import align_shape_with_bb
 from .utils import fsmooth
 
 
-def obtain_shape_from_bb(bounding_box, reference_shape):
-    r"""
-    Generates an initial shape given a bounding box detection.
-
-    Parameters
-    -----------
-    bounding_box: (2, 2) ndarray
-        The bounding box specified as:
-
-            np.array([[x_min, y_min], [x_max, y_max]])
-
-    Returns
-    -------
-    initial_shape: :class:`menpo.shape.PointCloud`
-        The initial shape.
-    """
-
-    return align_shape_with_bb(reference_shape,
-                               bounding_box).apply(reference_shape)
-
-
-def perturb_shape(gt_shape, reference_shape, noise_std=0.04, rotation=False):
-    r"""
-    Generates an initial shape by adding gaussian noise to the perfect
-    similarity alignment between the ground truth and reference_shape.
-
-    Parameters
-    -----------
-    gt_shape: :class:`menpo.shape.PointCloud`
-        The ground truth shape.
-    noise_std: float, optional
-        The standard deviation of the gaussian noise used to produce the
-        initial shape.
-
-        Default: 0.04
-    rotation: boolean, optional
-        Specifies whether ground truth in-plane rotation is to be used
-        to produce the initial shape.
-
-        Default: False
-
-    Returns
-    -------
-    initial_shape: :class:`menpo.shape.PointCloud`
-        The initial shape.
-    """
-    return noisy_align(reference_shape, gt_shape, noise_std=noise_std,
-                       rotation=rotation).apply(reference_shape)
-
-
 # Abstract Interface for Fitters ------------------------------------------
 
 class Fitter(object):

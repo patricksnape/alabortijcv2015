@@ -1,3 +1,4 @@
+from __future__ import division
 import numpy as np
 
 from menpo.base import Targetable, Vectorizable
@@ -403,14 +404,26 @@ class OrthoMDTransform(GlobalMDTransform):
 
 class OrthoLinearMDTransform(OrthoPDM, Transform):
 
-    def __init__(self, model, sigma2=1):
+    def __init__(self, model, sigma2=1, dense_indices=None, sparse_mask=None):
         super(OrthoLinearMDTransform, self).__init__(model, sigma2)
 
         self.W = np.vstack((self.similarity_model.components,
                             self.model.components))
-        # if self.n_landmarks:
-        #     V = self.W[:, :self.n_dims*self.n_landmarks]
-        #     self.pinv_V = np.linalg.pinv(V)
+
+        self.sparse_mask = sparse_mask
+        self.dense_indices = dense_indices
+
+        if sparse_mask is not None:
+            # These are linear indices into the un-vectorized pointcloud
+            # array. Since flattening goes (y,x,y,x,...), the indices get
+            # doubled, and then we need both y and x (+1) to every odd
+            # element
+            tiled_indices = np.tile(dense_indices, [2, 1])
+            tiled_indices *= 2
+            tiled_indices[1, :] += 1
+            tiled_indices = tiled_indices.T.ravel()
+            V = self.W[:, tiled_indices.ravel()]
+            self.pinv_V = np.linalg.pinv(V)
 
     @property
     def dense_target(self):
@@ -418,14 +431,14 @@ class OrthoLinearMDTransform(OrthoPDM, Transform):
 
     @property
     def sparse_target(self):
-        raise NotImplementedError('Use landmark mask.')
-        #return PointCloud(self.target.points)
+        return PointCloud(self.target.points[self.dense_indices, :])
 
     def set_target(self, target):
-        # if self.n_landmarks and target.n_points == self.n_landmarks:
-        #     # densify target
-        #     target = np.dot(np.dot(target.as_vector(), self.pinv_V), self.W)
-        #     target = PointCloud(np.reshape(target, (-1, self.n_dims)))
+        if target.n_points != self.target.n_points and self.sparse_mask is not None:
+            # Densify
+            subset = target.from_mask(self.sparse_mask)
+            target = np.dot(np.dot(subset.as_vector(), self.pinv_V), self.W)
+            target = PointCloud(np.reshape(target, (-1, self.n_dims)))
         OrthoPDM.set_target(self, target)
 
     def _apply(self, _, **kwargs):

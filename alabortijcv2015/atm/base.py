@@ -113,7 +113,8 @@ class GlobalATM(ATM):
 class LinearGlobalATM(ATM):
 
     def __init__(self, shape_models, templates, reference_frames,
-                 features, sigma, scales, scale_features, n_landmarks):
+                 features, sigma, scales, scale_features, dense_indices=None,
+                 sparse_masks=None):
 
         self.shape_models = shape_models
         self.templates = templates
@@ -122,7 +123,8 @@ class LinearGlobalATM(ATM):
         self.sigma = sigma
         self.scales = scales
         self.scale_features = scale_features
-        self.n_landmarks = n_landmarks
+        self.dense_indices = dense_indices
+        self.sparse_masks = sparse_masks
 
     def _instance(self, level, shape_instance, template):
         from .builder import zero_flow_grid_pcloud
@@ -143,3 +145,15 @@ class LinearGlobalATM(ATM):
     def reference_shape(self):
         return PointCloud(self.reference_frames[0].as_vector(
             keep_channels=True).T)
+
+    @property
+    def dense_reference_shape(self):
+        return PointCloud(self.reference_frames[0].as_vector(
+            keep_channels=True).T)
+
+    @property
+    def sparse_reference_shape(self):
+        if self.dense_indices is None:
+            raise ValueError('Model not built with known sparse landmarks.')
+        return PointCloud(self.reference_frames[0].as_vector(
+            keep_channels=True).T).from_mask(self.dense_indices[0])
