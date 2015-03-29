@@ -5,6 +5,8 @@ from alabortijcv2015.result import (AlgorithmResult, FitterResult,
 
 
 # Concrete Implementations of ATM Algorithm Results ---------------------------
+from menpofit.fittingresult import compute_error
+
 
 class ATMAlgorithmResult(AlgorithmResult):
 
@@ -102,6 +104,74 @@ class ATMFitterResult(FitterResult):
         :type: `float`
         """
         return self.algorithm_results[0].initial_cost
+
+    def errors(self, error_type='me_norm'):
+        r"""
+        Returns a list containing the error at each fitting iteration.
+
+        Parameters
+        -----------
+        error_type : `str` ``{'me_norm', 'me', 'rmse'}``, optional
+            Specifies the way in which the error between the fitted and
+            ground truth shapes is to be computed.
+
+        Returns
+        -------
+        errors : `list` of `float`
+            The errors at each iteration of the fitting process.
+        """
+        if self.gt_shape is not None:
+            return [compute_error(t, ar.gt_shape, error_type)
+                    for t, ar in zip(self.shapes(), self.algorithm_results)]
+        else:
+            raise ValueError('Ground truth has not been set, errors cannot '
+                             'be computed')
+
+    def final_error(self, error_type='me_norm'):
+        r"""
+        Returns the final fitting error.
+
+        Parameters
+        -----------
+        error_type : `str` ``{'me_norm', 'me', 'rmse'}``, optional
+            Specifies the way in which the error between the fitted and
+            ground truth shapes is to be computed.
+
+        Returns
+        -------
+        final_error : `float`
+            The final error at the end of the fitting procedure.
+        """
+        if self.gt_shape is not None:
+            return compute_error(self.final_shape,
+                                 self.algorithm_results[-1].gt_shape,
+                                 error_type)
+        else:
+            raise ValueError('Ground truth has not been set, final error '
+                             'cannot be computed')
+
+    def initial_error(self, error_type='me_norm'):
+        r"""
+        Returns the initial fitting error.
+
+        Parameters
+        -----------
+        error_type : `str` ``{'me_norm', 'me', 'rmse'}``, optional
+            Specifies the way in which the error between the fitted and
+            ground truth shapes is to be computed.
+
+        Returns
+        -------
+        initial_error : `float`
+            The initial error at the start of the fitting procedure.
+        """
+        if self.gt_shape is not None:
+            return compute_error(self.initial_shape,
+                                 self.algorithm_results[0].gt_shape,
+                                 error_type)
+        else:
+            raise ValueError('Ground truth has not been set, final error '
+                             'cannot be computed')
 
 
 # Serializable ATM Fitter Result ----------------------------------------------

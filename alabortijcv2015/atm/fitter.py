@@ -308,6 +308,7 @@ class LinearATMFitter(ATMFitter):
                                                   max_iters, self.scales)):
             if seq_gt_shapes:
                 gt_shapes = seq_gt_shapes[j]
+                gt_shapes = [self._mask_gt_shape(alg, g) for g in gt_shapes]
             else:
                 gt_shapes = None
 

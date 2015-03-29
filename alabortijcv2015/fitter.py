@@ -287,7 +287,7 @@ class Fitter(object):
 
         # get ground truth shapes per level
         if gt_shape:
-            gt_shapes = [i.landmarks['gt_shape'].lms for i in images]
+            gt_shapes = [gt_shape.copy()] * len(images)
         else:
             gt_shapes = None
 
