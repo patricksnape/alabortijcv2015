@@ -247,11 +247,11 @@ class AlgorithmResult(Result):
 
     @property
     def final_shape(self):
-        return self.final_transform.target
+        return self.final_transform.target.copy()
 
     @property
     def initial_shape(self):
-        return self.initial_transform.target
+        return self.initial_transform.target.copy()
 
 
 # Abstract Interface for Fitter Results ---------------------------------------
@@ -371,12 +371,12 @@ class FitterResult(Result):
 
         :type: :map:`PointCloud`
         """
-        final_shape = self.algorithm_results[-1].final_shape
+        final_shape = self.algorithm_results[-1].final_shape.copy()
         return self._affine_correction.apply(final_shape)
 
     @property
     def initial_shape(self):
-        initial_shape = self.algorithm_results[0].initial_shape
+        initial_shape = self.algorithm_results[0].initial_shape.copy()
         Scale(self.scales[-1]/self.scales[0],
               initial_shape.n_dims).apply_inplace(initial_shape)
         return self._affine_correction.apply(initial_shape)

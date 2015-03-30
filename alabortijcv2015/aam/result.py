@@ -52,11 +52,11 @@ class LinearAAMAlgorithmResult(AAMAlgorithmResult):
 
     @property
     def final_shape(self):
-        return self.final_transform.dense_target
+        return self.final_transform.dense_target.copy()
 
     @property
     def initial_shape(self):
-        return self.initial_transform.dense_target
+        return self.initial_transform.dense_target.copy()
 
 
 # Concrete Implementations of AAM Fitter Results ------------------------------

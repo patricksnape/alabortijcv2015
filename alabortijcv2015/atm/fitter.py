@@ -9,7 +9,7 @@ from menpo.transform import (Scale, AlignmentAffine, UniformScale,
 from menpo.visualize import print_dynamic
 from menpo.shape import PointCloud
 from menpofit.base import noisy_align
-from .result import ATMFitterResult
+from .result import ATMFitterResult, LinearATMFitterResult
 
 
 # Abstract Interface for ATM Fitters ------------------------------------------
@@ -166,12 +166,13 @@ class LinearATMFitter(ATMFitter):
         # Warp the image up to interpolate
         current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
             self.dm.reference_frames[level + 1].mask,
-            UniformScale(scale, 2))
+            UniformScale(scale / self.scales[level + 1], 2))
         # Back to pointcloud.
         shape = PointCloud(current_shape_im.as_vector(
             keep_channels=True).T)
         # But the values haven't changed! So we scale them as well.
-        UniformScale(1.0 / scale, 2).apply_inplace(shape)
+        Scale(self.scales[level + 1] / scale,
+              n_dims=shape.n_dims).apply_inplace(shape)
         return shape
 
     @property
@@ -192,8 +193,8 @@ class LinearATMFitter(ATMFitter):
 
     def _fitter_result(self, image, algorithm_results, affine_correction,
                        gt_shape=None):
-        return ATMFitterResult(image, self, algorithm_results,
-                               affine_correction, gt_shape=gt_shape)
+        return LinearATMFitterResult(image, self, algorithm_results,
+                                     affine_correction, gt_shape=gt_shape)
 
 ###############################Fitting Algorithms###############################
 

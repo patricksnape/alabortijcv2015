@@ -5,6 +5,8 @@ from alabortijcv2015.result import (AlgorithmResult, FitterResult,
 
 
 # Concrete Implementations of ATM Algorithm Results ---------------------------
+from menpo.transform import Scale
+
 
 class ATMAlgorithmResult(AlgorithmResult):
 
@@ -114,6 +116,25 @@ class ATMFitterResult(FitterResult):
         :type: `float`
         """
         return self.algorithm_results[0].initial_cost
+
+
+class LinearATMFitterResult(ATMFitterResult):
+    @property
+    def final_dense_shape(self):
+        r"""
+        The final fitted shape.
+
+        :type: :map:`PointCloud`
+        """
+        final_shape = self.algorithm_results[-1].final_dense_shape.copy()
+        return self._affine_correction.apply(final_shape)
+
+    @property
+    def initial_dense_shape(self):
+        initial_shape = self.algorithm_results[0].initial_dense_shape.copy()
+        Scale(self.scales[-1]/self.scales[0],
+              initial_shape.n_dims).apply_inplace(initial_shape)
+        return self._affine_correction.apply(initial_shape)
 
 
 # Serializable ATM Fitter Result ----------------------------------------------
