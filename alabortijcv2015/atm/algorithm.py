@@ -263,7 +263,6 @@ class TAIC(ATMAlgorithm):
         shape_parameters = [self.transform.as_vector()]
 
         for _ in xrange(max_iters):
-
             # warp image
             i = self.interface.warp(image)
             # mask image
@@ -278,12 +277,6 @@ class TAIC(ATMAlgorithm):
             # update transform
             self.transform.from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
-
-            # test convergence
-            # error = np.abs(np.linalg.norm(
-            #     target.points - self.transform.target.points))
-            # if error < self.eps:
-            #     break
 
             # save cost
             cost.append(e.T.dot(e))

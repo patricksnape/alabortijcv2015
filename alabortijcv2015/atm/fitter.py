@@ -19,43 +19,6 @@ class ATMFitter(Fitter):
 
     def fit_sequence(self, images, initial_shapes, max_iters=50, gt_shapes=None,
                      crop_image=None, **kwargs):
-        r"""
-        Fits the multilevel algorithm to an image.
-
-        Parameters
-        -----------
-        images: :map:`Image` or subclass
-            The images to be fitted.
-        initial_shape: :map:`PointCloud`
-            The initial shape estimate from which the fitting procedure
-            will start.
-        max_iters: `int` or `list` of `int`, optional
-            The maximum number of iterations.
-            If `int`, specifies the overall maximum number of iterations.
-            If `list` of `int`, specifies the maximum number of iterations per
-            level.
-        gt_shape: :map:`PointCloud`
-            The ground truth shape associated to the image.
-        crop_image: `None` or float`, optional
-            If `float`, it specifies the proportion of the border wrt the
-            initial shape to which the image will be internally cropped around
-            the initial shape range.
-            If `None`, no cropping is performed.
-
-            This will limit the fitting algorithm search region but is
-            likely to speed up its running time, specially when the
-            modeled object occupies a small portion of the image.
-        **kwargs:
-            Additional keyword arguments that can be passed to specific
-            implementations of ``_fit`` method.
-
-        Returns
-        -------
-        multi_fitting_result: :map:`MultilevelFittingResult`
-            The multilevel fitting result containing the result of
-            fitting procedure.
-        """
-
         # generate the list of images to be fitted
         prepared_objs = []
         for k, (im, ish) in enumerate(zip(images, initial_shapes)):
@@ -105,33 +68,6 @@ class ATMFitter(Fitter):
 
     def _fit_sequence(self, seq_images, seq_initial_shapes, seq_gt_shapes=None,
                       max_iters=50, **kwargs):
-        r"""
-        Fits the algorithm to the multilevel pyramidal images.
-
-        Parameters
-        -----------
-        images: :class:`menpo.image.masked.MaskedImage` list
-            The images to be fitted.
-        initial_shapes: :class:`menpo.shape.PointCloud`
-            The initial shape from which the fitting will start.
-        gt_shapes: :class:`menpo.shape.PointCloud` list, optional
-            The original ground truth shapes associated to the multilevel
-            images.
-        max_iters: int or list, optional
-            The maximum number of iterations.
-            If int, then this will be the overall maximum number of iterations
-            for all the pyramidal levels.
-            If list, then a maximum number of iterations is specified for each
-            pyramidal level.
-
-            Default: 50
-
-        Returns
-        -------
-        algorithm_results: :class:`menpo.fg2015.fittingresult.FittingResult` list
-            The fitting object containing the state of the whole fitting
-            procedure.
-        """
         max_iters = self._prepare_max_iters(max_iters)
 
         seq_algorithm_results = []
@@ -210,38 +146,59 @@ class LinearATMFitter(ATMFitter):
 
             self._algorithms.append(algorithm)
 
+    def _mask_gt_shape(self, alg, gt_shape):
+        if alg.transform.sparse_mask is not None:
+            # Assume the GT is sparse
+            if gt_shape.n_points < alg.transform.dense_target.n_points:
+                gt_shape = gt_shape.from_mask(alg.transform.sparse_mask)
+        return gt_shape
+
+    def _interpolate_shape(self, shape, level, scale):
+        # Create an image from the final shape for interpolation
+        current_shape_im = self.dm.reference_frames[level].from_vector(
+            shape.points.T.ravel(), n_channels=2)
+        # TODO: lazily 'zoom' into the image to stop interpolation
+        # issues at the boundaries. Really the image should have a
+        # mask that is slightly too small to deal with this, or
+        # model based interpolation should be performed using the
+        # next shape model
+        current_shape_im = current_shape_im.zoom(1.02)
+        # Warp the image up to interpolate
+        current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
+            self.dm.reference_frames[level + 1].mask,
+            UniformScale(scale, 2))
+        # Back to pointcloud.
+        shape = PointCloud(current_shape_im.as_vector(
+            keep_channels=True).T)
+        # But the values haven't changed! So we scale them as well.
+        UniformScale(1.0 / scale, 2).apply_inplace(shape)
+        return shape
+
+    @property
+    def reference_shape(self):
+        return PointCloud(self.dm.reference_frames[0].as_vector(
+            keep_channels=True).T)
+
+    def perturb_sparse_shape(self, gt_shape, noise_std=0.04, rotation=False):
+        reference_shape = self.reference_shape
+        transform = self._algorithms[0].transform
+        gt_to_m = AlignmentSimilarity(gt_shape.from_mask(transform.sparse_mask),
+                                      transform.sparse_target)
+        transform.set_target(gt_to_m.apply(gt_shape))
+        scaled_target = gt_to_m.pseudoinverse().apply(transform.dense_target)
+        return noisy_align(reference_shape, scaled_target,
+                           noise_std=noise_std,
+                           rotation=rotation).apply(reference_shape)
+
+    def _fitter_result(self, image, algorithm_results, affine_correction,
+                       gt_shape=None):
+        return ATMFitterResult(image, self, algorithm_results,
+                               affine_correction, gt_shape=gt_shape)
+
+###############################Fitting Algorithms###############################
+
     def _fit(self, images, initial_shape, gt_shapes=None, max_iters=50,
              **kwargs):
-        r"""
-        Fits the algorithm to the multilevel pyramidal images.
-
-        Parameters
-        -----------
-        images: :class:`menpo.image.masked.MaskedImage` list
-            The images to be fitted.
-        initial_shape: :class:`menpo.shape.PointCloud`
-            The initial shape from which the fitting will start.
-        gt_shapes: :class:`menpo.shape.PointCloud` list, optional
-            The original ground truth shapes associated to the multilevel
-            images.
-
-            Default: None
-        max_iters: int or list, optional
-            The maximum number of iterations.
-            If int, then this will be the overall maximum number of iterations
-            for all the pyramidal levels.
-            If list, then a maximum number of iterations is specified for each
-            pyramidal level.
-
-            Default: 50
-
-        Returns
-        -------
-        algorithm_results: :class:`menpo.fg2015.fittingresult.FittingResult` list
-            The fitting object containing the state of the whole fitting
-            procedure.
-        """
-
         max_iters = self._prepare_max_iters(max_iters)
 
         shape = initial_shape
@@ -262,42 +219,8 @@ class LinearATMFitter(ATMFitter):
 
         return algorithm_results
 
-    def _mask_gt_shape(self, alg, gt_shape):
-        if alg.transform.sparse_mask is not None:
-            # Assume the GT is sparse
-            if gt_shape.n_points < alg.transform.dense_target.n_points:
-                gt_shape = gt_shape.from_mask(alg.transform.sparse_mask)
-        return gt_shape
-
     def _fit_sequence(self, seq_images, seq_initial_shapes, seq_gt_shapes=None,
                       max_iters=50, **kwargs):
-        r"""
-        Fits the algorithm to the multilevel pyramidal images.
-
-        Parameters
-        -----------
-        images: :class:`menpo.image.masked.MaskedImage` list
-            The images to be fitted.
-        initial_shapes: :class:`menpo.shape.PointCloud`
-            The initial shape from which the fitting will start.
-        gt_shapes: :class:`menpo.shape.PointCloud` list, optional
-            The original ground truth shapes associated to the multilevel
-            images.
-        max_iters: int or list, optional
-            The maximum number of iterations.
-            If int, then this will be the overall maximum number of iterations
-            for all the pyramidal levels.
-            If list, then a maximum number of iterations is specified for each
-            pyramidal level.
-
-            Default: 50
-
-        Returns
-        -------
-        algorithm_results: :class:`menpo.fg2015.fittingresult.FittingResult` list
-            The fitting object containing the state of the whole fitting
-            procedure.
-        """
         max_iters = self._prepare_max_iters(max_iters)
 
         seq_algorithm_results = []

@@ -422,8 +422,8 @@ class OrthoLinearMDTransform(OrthoPDM, Transform):
             tiled_indices *= 2
             tiled_indices[1, :] += 1
             tiled_indices = tiled_indices.T.ravel()
-            V = self.W[:, tiled_indices.ravel()]
-            self.pinv_V = np.linalg.pinv(V)
+            self.V = self.W[:, tiled_indices.ravel()]
+            self.pinv_V = np.linalg.pinv(self.V)
 
     @property
     def dense_target(self):

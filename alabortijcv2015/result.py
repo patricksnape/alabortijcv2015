@@ -41,6 +41,26 @@ class Result(object):
             A list containing the shapes obtained at each fitting iteration.
         """
 
+    @abc.abstractmethod
+    def gt_shapes(self, as_points=False):
+        r"""
+        Generates a list containing the shapes obtained at each fitting
+        iteration.
+
+        Parameters
+        -----------
+        as_points : boolean, optional
+            Whether the results is returned as a list of :map:`PointCloud`s or
+            ndarrays.
+
+            Default: `False`
+
+        Returns
+        -------
+        shapes : :map:`PointCloud`s or ndarray list
+            A list containing the shapes obtained at each fitting iteration.
+        """
+
     @abc.abstractproperty
     def final_shape(self):
         r"""
@@ -53,12 +73,23 @@ class Result(object):
         Returns the initial shape from which the fitting started.
         """
 
-    @property
+    @abc.abstractproperty
+    def final_gt_shape(self):
+        r"""
+        Returns the final fitted shape.
+        """
+
+    @abc.abstractproperty
+    def initial_gt_shape(self):
+        r"""
+        Returns the initial shape from which the fitting started.
+        """
+
+    @abc.abstractproperty
     def gt_shape(self):
         r"""
         Returns the original ground truth shape associated to the image.
         """
-        return self._gt_shape
 
     @property
     def fitted_image(self):
@@ -114,8 +145,8 @@ class Result(object):
             The errors at each iteration of the fitting process.
         """
         if self.gt_shape is not None:
-            return [compute_error(t, self.gt_shape, error_type)
-                    for t in self.shapes()]
+            return [compute_error(s, gt, error_type)
+                    for s, gt in zip(self.shapes(), self.gt_shapes())]
         else:
             raise ValueError('Ground truth has not been set, errors cannot '
                              'be computed')
@@ -136,7 +167,8 @@ class Result(object):
             The final error at the end of the fitting procedure.
         """
         if self.gt_shape is not None:
-            return compute_error(self.final_shape, self.gt_shape, error_type)
+            return compute_error(self.final_shape, self.final_gt_shape,
+                                 error_type)
         else:
             raise ValueError('Ground truth has not been set, final error '
                              'cannot be computed')
@@ -157,7 +189,8 @@ class Result(object):
             The initial error at the start of the fitting procedure.
         """
         if self.gt_shape is not None:
-            return compute_error(self.initial_shape, self.gt_shape, error_type)
+            return compute_error(self.initial_shape, self.initial_gt_shape,
+                                 error_type)
         else:
             raise ValueError('Ground truth has not been set, final error '
                              'cannot be computed')
@@ -171,6 +204,10 @@ class Result(object):
 # Abstract Interfaces for Algorithm Results -----------------------------------
 
 class AlgorithmResult(Result):
+
+    @property
+    def gt_shape(self):
+        return self._gt_shape
 
     @property
     def n_iters(self):
@@ -228,7 +265,6 @@ class FitterResult(Result):
         self.fitter = fitter
         self.algorithm_results = algorithm_results
         self._affine_correction = affine_correction
-        self._gt_shape = gt_shape
         # TODO: Remove when the widgets are fixed.
         self.downscale = 0
 
@@ -256,6 +292,51 @@ class FitterResult(Result):
         for f in self.algorithm_results:
             n_iters += f.n_iters
         return n_iters
+
+    @property
+    def gt_shape(self):
+        gt_shape = self.algorithm_results[-1].gt_shape.copy()
+        return self._affine_correction.apply(gt_shape)
+
+    @property
+    def initial_gt_shape(self):
+        gt_shape = self.algorithm_results[0].gt_shape.copy()
+        Scale(self.scales[-1] / self.scales[0],
+              gt_shape.n_dims).apply_inplace(gt_shape)
+        return self._affine_correction.apply(gt_shape)
+
+    @property
+    def final_gt_shape(self):
+        gt_shape = self.algorithm_results[-1].gt_shape.copy()
+        return self._affine_correction.apply(gt_shape)
+
+    def gt_shapes(self, as_points=False):
+        r"""
+        Generates a list containing the shapes obtained at each fitting
+        iteration.
+
+        Parameters
+        -----------
+        as_points : `boolean`, optional
+            Whether the result is returned as a `list` of :map:`PointCloud` or
+            a `list` of `ndarrays`.
+
+        Returns
+        -------
+        shapes : `list` of :map:`PointCoulds` or `list` of `ndarray`
+            A list containing the fitted shapes at each iteration of
+            the fitting procedure.
+        """
+        shapes = []
+        for j, (alg, s) in enumerate(zip(self.algorithm_results, self.scales)):
+            transform = Scale(self.scales[-1] / s, alg.gt_shape.n_dims)
+            for _ in range(alg.n_iters + 1):
+                t = transform.apply(alg.gt_shape)
+                shapes.append(self._affine_correction.apply(t))
+
+        if as_points:
+            shapes = [s.points for s in shapes]
+        return shapes
 
     def shapes(self, as_points=False):
         r"""
