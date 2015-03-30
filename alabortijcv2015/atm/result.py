@@ -5,8 +5,6 @@ from alabortijcv2015.result import (AlgorithmResult, FitterResult,
 
 
 # Concrete Implementations of ATM Algorithm Results ---------------------------
-from menpofit.fittingresult import compute_error
-
 
 class ATMAlgorithmResult(AlgorithmResult):
 

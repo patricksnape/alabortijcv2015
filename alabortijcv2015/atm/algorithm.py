@@ -6,6 +6,7 @@ import scipy
 from scipy.sparse import block_diag
 
 from menpo.feature import gradient as fast_gradient
+from menpo.transform import Similarity
 
 from .result import ATMAlgorithmResult, LinearATMAlgorithmResult
 
@@ -231,14 +232,87 @@ class ATMAlgorithm(object):
         pass
 
 
-class TAIC(ATMAlgorithm):
+class ConstrainedTIC(ATMAlgorithm):
     r"""
-    Template Alternating Inverse Compositional Gauss-Newton Algorithm
+    Template Inverse Compositional Gauss-Newton Algorithm
     """
     def __init__(self, atm_interface, template, transform,
                  eps=10**-5, **kwargs):
         # call super constructor
-        super(TAIC, self).__init__(
+        super(ConstrainedTIC, self).__init__(
+            atm_interface, template, transform, eps, **kwargs)
+
+        # pre-compute
+        self._precompute()
+
+    def _precompute(self):
+        # compute warp jacobian
+        self._dw_dp = self.interface.dw_dp()
+        self.nabla_t = self.interface.gradient(self.template)
+        self.vec_template = self.template.as_vector()[self.interface.image_vec_mask]
+        self.j = self.interface.steepest_descent_images(self.nabla_t,
+                                                        self._dw_dp)
+        # slice off the global similarity
+        self.j_nr = np.vstack([self.j,
+                               self.transform.V.T])
+        self.h = self.j.T.dot(self.j)
+        self.h_nr = self.j_nr.T.dot(self.j_nr)
+
+    def run(self, image, initial_shape, gt_shape=None, max_iters=20, prior=False):
+        if gt_shape is None:
+            raise ValueError('The sparse GT is required for a constrained fit!')
+        # initialize cost
+        cost = []
+        # initialize transform
+        self.transform.set_target(initial_shape)
+        shape_parameters = [self.transform.as_vector()]
+
+        for _ in xrange(max_iters):
+
+            # warp image
+            i = self.interface.warp(image)
+            # mask image
+            masked_i = i.as_vector()[self.interface.image_vec_mask]
+
+            # compute error image
+            e = self.vec_template - masked_i
+
+            # solve for normal shape updates (includes similarity)
+            #dp = self.interface.solve(self.h, self.j, e, prior)
+            # update similarity component
+            #sim_dp = np.zeros_like(dp)
+            #sim_dp[:4] = dp[:4]
+            #self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+
+            # solve for constrained error
+            #agt = self.transform.global_transform.pseudoinverse().apply(gt_shape)
+            e_tot = np.hstack([e, gt_shape.as_vector()])
+            dp = self.interface.solve(self.h_nr, self.j_nr, e_tot, prior)
+            # Don't re-apply the similarity
+            #dp = np.hstack([np.zeros(4), dp])
+            #dp[:4] = 0.0
+
+            # update transform
+            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            shape_parameters.append(self.transform.as_vector())
+
+            # save cost
+            cost.append(e.T.dot(e))
+
+        # return aam algorithm result
+        return self.interface.algorithm_result(
+            image, shape_parameters, cost,
+            gt_shape=gt_shape)
+
+
+class TIC(ATMAlgorithm):
+    r"""
+    Constrained Template Inverse Compositional Gauss-Newton Algorithm
+    """
+    def __init__(self, atm_interface, template, transform,
+                 eps=10**-5, **kwargs):
+        # call super constructor
+        super(TIC, self).__init__(
             atm_interface, template, transform, eps, **kwargs)
 
         # pre-compute
@@ -287,14 +361,14 @@ class TAIC(ATMAlgorithm):
             gt_shape=gt_shape)
 
 
-class SequenceTAIC(ATMAlgorithm):
+class SequenceTIC(ATMAlgorithm):
     r"""
-    Template Alternating Inverse Compositional Gauss-Newton Algorithm
+    Template Inverse Compositional Gauss-Newton Algorithm
     """
     def __init__(self, atm_interface, template, transform,
                  eps=10**-5, **kwargs):
         # call super constructor
-        super(SequenceTAIC, self).__init__(
+        super(SequenceTIC, self).__init__(
             atm_interface, template, transform, eps, **kwargs)
 
         # pre-compute

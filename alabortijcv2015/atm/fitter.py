@@ -3,7 +3,7 @@ from __future__ import division
 from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
 
-from .algorithm import StandardATMInterface, LinearATMInterface, TAIC
+from .algorithm import StandardATMInterface, LinearATMInterface, TIC
 from menpo.transform import (Scale, AlignmentAffine, UniformScale,
                              AlignmentSimilarity)
 from menpo.visualize import print_dynamic
@@ -107,7 +107,7 @@ class ATMFitter(Fitter):
 
 class StandardATMFitter(ATMFitter):
 
-    def __init__(self, global_atm, algorithm_cls=TAIC, n_shape=None, **kwargs):
+    def __init__(self, global_atm, algorithm_cls=TIC, n_shape=None, **kwargs):
         super(StandardATMFitter, self).__init__()
 
         self.dm = global_atm
@@ -128,7 +128,7 @@ class StandardATMFitter(ATMFitter):
 
 class LinearATMFitter(ATMFitter):
 
-    def __init__(self, global_atm, algorithm_cls=TAIC, n_shape=None, **kwargs):
+    def __init__(self, global_atm, algorithm_cls=TIC, n_shape=None, **kwargs):
         super(LinearATMFitter, self).__init__()
 
         self.dm = global_atm
@@ -249,68 +249,106 @@ class LinearATMFitter(ATMFitter):
 
         return [r for r in zip(*seq_algorithm_results)]
 
-    def _interpolate_shape(self, shape, level, scale):
-        # Create an image from the final shape for interpolation
-        current_shape_im = self.dm.reference_frames[level].from_vector(
-            shape.points.T.ravel(), n_channels=2)
-        # TODO: lazily 'zoom' into the image to stop interpolation
-        # issues at the boundaries. Really the image should have a
-        # mask that is slightly too small to deal with this, or
-        # model based interpolation should be performed using the
-        # next shape model
-        current_shape_im = current_shape_im.zoom(1.02)
-        # Warp the image up to interpolate
-        current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
-            self.dm.reference_frames[level + 1].mask,
-            UniformScale(scale, 2))
-        # Back to pointcloud.
-        shape = PointCloud(current_shape_im.as_vector(
-            keep_channels=True).T)
-        # But the values haven't changed! So we scale them as well.
-        UniformScale(1.0 / scale, 2).apply_inplace(shape)
-        return shape
+    def fit_constrained(self, image, gt_sparse_shape, initial_shape,
+                        max_iters=50, crop_image=None, **kwargs):
+        # generate the list of images to be fitted
+        images, initial_shapes, gt_shapes = self._prepare_image(
+            image, initial_shape, gt_shape=gt_sparse_shape,
+            crop_image=crop_image)
 
-    @property
-    def reference_shape(self):
-        return PointCloud(self.dm.reference_frames[0].as_vector(
-            keep_channels=True).T)
+        # work out the affine transform between the initial shape of the
+        # highest pyramidal level and the initial shape of the original image
+        affine_correction = AlignmentAffine(initial_shapes[-1], initial_shape)
 
-    def perturb_sparse_shape(self, gt_shape, noise_std=0.04, rotation=False):
-        r"""
-        Generates an initial shape by adding gaussian noise to the perfect
-        similarity alignment between the ground truth and reference_shape.
+        # run multilevel fitting
+        algorithm_results = self._fit(images, initial_shapes[0],
+                                      max_iters=max_iters,
+                                      gt_shapes=gt_shapes, **kwargs)
 
-        Parameters
-        -----------
-        gt_shape: :class:`menpo.shape.PointCloud`
-            The ground truth shape.
-        noise_std: float, optional
-            The standard deviation of the gaussian noise used to produce the
-            initial shape.
+        # build multilevel fitting result
+        fitter_result = self._fitter_result(
+            image, algorithm_results, affine_correction,
+            gt_shape=gt_sparse_shape)
 
-            Default: 0.04
-        rotation: boolean, optional
-            Specifies whether ground truth in-plane rotation is to be used
-            to produce the initial shape.
+        return fitter_result
 
-            Default: False
+    def fit_constrained_sequence(self, images, sparse_shapes, initial_shapes,
+                                 max_iters=50, gt_shapes=None, crop_image=None,
+                                 **kwargs):
+        # generate the list of images to be fitted
+        prepared_objs = []
+        for k, (im, ish) in enumerate(zip(images, initial_shapes)):
+            if gt_shapes:
+                gt = gt_shapes[k]
+            else:
+                gt = None
+            prepared_objs.append(self._prepare_image(im, ish,
+                                                     gt_shape=gt,
+                                                     crop_image=crop_image))
+        # Group into the three types
+        # Then group each scale together for each type
+        for k in range(len(prepared_objs)):
+            o = prepared_objs[k]
+            if o[-1] is None:
+                prepared_objs[k] = (prepared_objs[k][0], prepared_objs[k][1], [])
 
-        Returns
-        -------
-        initial_shape: :class:`menpo.shape.PointCloud`
-            The initial shape.
-        """
-        reference_shape = self.reference_shape
-        transform = self._algorithms[0].transform
-        gt_to_m = AlignmentSimilarity(gt_shape.from_mask(transform.sparse_mask),
-                                      transform.sparse_target)
-        transform.set_target(gt_to_m.apply(gt_shape))
-        scaled_target = gt_to_m.pseudoinverse().apply(transform.dense_target)
-        return noisy_align(reference_shape, scaled_target,
-                           noise_std=noise_std,
-                           rotation=rotation).apply(reference_shape)
+        seq_images, seq_initial_shapes, seq_gt_shapes = [zip(*obj)
+                                                         for obj in zip(*prepared_objs)]
 
-    def _fitter_result(self, image, algorithm_results, affine_correction,
-                       gt_shape=None):
-        return ATMFitterResult(image, self, algorithm_results,
-                               affine_correction, gt_shape=gt_shape)
+        # work out the affine transform between the initial shape of the
+        # highest pyramidal level and the initial shape of the original image
+        affine_corrections = [AlignmentAffine(sish, ish)
+                              for ish, sish in zip(initial_shapes,
+                                                   seq_initial_shapes[-1])]
+
+        # run multilevel fitting
+        algorithm_results = self._fit_sequence(seq_images,
+                                               seq_initial_shapes[0],
+                                               max_iters=max_iters,
+                                               seq_gt_shapes=seq_gt_shapes,
+                                               **kwargs)
+
+        # build multilevel fitting results
+        fitter_results = []
+        for k, (im, alg_res, aff_corr) in enumerate(zip(images,
+                                                        algorithm_results,
+                                                        affine_corrections)):
+            if gt_shapes:
+                gt_shape = gt_shapes[k]
+            else:
+                gt_shape = None
+            fitter_results.append(self._fitter_result(im, alg_res, aff_corr,
+                                                      gt_shape=gt_shape))
+
+        return fitter_results
+
+    def _fit_constrained_sequence(self, seq_images, seq_initial_shapes,
+                                  seq_gt_shapes=None, max_iters=50, **kwargs):
+        max_iters = self._prepare_max_iters(max_iters)
+
+        seq_algorithm_results = []
+        shapes = seq_initial_shapes
+        print_dynamic('Beginning Fitting...'.format(j))
+        for j, (ims, alg, it, s) in enumerate(zip(seq_images,
+                                                  self._algorithms,
+                                                  max_iters, self.scales)):
+            if seq_gt_shapes:
+                gt_shapes = seq_gt_shapes[j]
+            else:
+                gt_shapes = None
+
+            algorithm_results = alg.run(ims, shapes,
+                                        gt_shapes=gt_shapes,
+                                        max_iters=it, **kwargs)
+            seq_algorithm_results.append(algorithm_results)
+
+            if s != self.scales[-1]:
+                shapes = []
+                for alg in algorithm_results:
+                    sh = alg.final_shape
+                    Scale(self.scales[j + 1] / s,
+                          n_dims=sh.n_dims).apply_inplace(sh)
+                    shapes.append(sh)
+            print_dynamic('Finished Scale {}'.format(j))
+
+        return [r for r in zip(*seq_algorithm_results)]
