@@ -195,10 +195,13 @@ class LinearATMInterface(StandardATMInterface):
             # dp = -np.linalg.solve(t.h_prior + jp.dot(inv_h.dot(jp.T)),
             #                       t.j_prior * t.as_vector() - jp.dot(dp))
         else:
-            block_es = block_diag([e for e in es.T]).T
-            # Make sure the dot product is sparse
-            res = block_es.T.dot(j).T
-            dp = np.linalg.solve(h, res)
+            # Block diagonal solution
+            # block_es = block_diag([e for e in es.T]).T
+            # res = block_es.T.dot(j).T
+            # dp = np.linalg.solve(h, res)
+            dp = np.zeros([h.shape[0], len(es)])
+            for k, e in enumerate(es):
+                dp[:, k] = np.linalg.solve(h, j.T.dot(e))
 
         return dp
 
@@ -238,6 +241,10 @@ class ConstrainedTIC(ATMAlgorithm):
     """
     def __init__(self, atm_interface, template, transform,
                  eps=10**-5, **kwargs):
+
+        self.landmark_weight = np.sqrt(kwargs.pop('landmark_weight', 1.0))
+        self.data_weight = np.sqrt(kwargs.pop('data_weight', 1.0))
+
         # call super constructor
         super(ConstrainedTIC, self).__init__(
             atm_interface, template, transform, eps, **kwargs)
@@ -252,13 +259,13 @@ class ConstrainedTIC(ATMAlgorithm):
         self.vec_template = self.template.as_vector()[self.interface.image_vec_mask]
         self.j = self.interface.steepest_descent_images(self.nabla_t,
                                                         self._dw_dp)
-        # slice off the global similarity
-        self.j_nr = np.vstack([self.j,
-                               self.transform.V.T])
-        self.h = self.j.T.dot(self.j)
+
+        self.j_nr = np.vstack([self.data_weight * self.j,
+                               self.landmark_weight * self.transform.V.T])
         self.h_nr = self.j_nr.T.dot(self.j_nr)
 
-    def run(self, image, initial_shape, gt_shape=None, max_iters=20, prior=False):
+    def run(self, image, initial_shape, gt_shape=None, max_iters=20,
+            prior=False):
         if gt_shape is None:
             raise ValueError('The sparse GT is required for a constrained fit!')
         # initialize cost
@@ -266,6 +273,8 @@ class ConstrainedTIC(ATMAlgorithm):
         # initialize transform
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
+
+        gt_s_v = gt_shape.as_vector()
 
         for _ in xrange(max_iters):
 
@@ -277,20 +286,13 @@ class ConstrainedTIC(ATMAlgorithm):
             # compute error image
             e = self.vec_template - masked_i
 
-            # solve for normal shape updates (includes similarity)
-            #dp = self.interface.solve(self.h, self.j, e, prior)
-            # update similarity component
-            #sim_dp = np.zeros_like(dp)
-            #sim_dp[:4] = dp[:4]
-            #self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            # compute the landmark error
+            gt_d = gt_s_v - self.transform.sparse_target.points.ravel()
 
-            # solve for constrained error
-            #agt = self.transform.global_transform.pseudoinverse().apply(gt_shape)
-            e_tot = np.hstack([e, gt_shape.as_vector()])
+            # Calculate delta_p
+            e_tot = np.hstack([self.data_weight * e,
+                               self.landmark_weight * gt_d])
             dp = self.interface.solve(self.h_nr, self.j_nr, e_tot, prior)
-            # Don't re-apply the similarity
-            #dp = np.hstack([np.zeros(4), dp])
-            #dp[:4] = 0.0
 
             # update transform
             self.transform.from_vector_inplace(self.transform.as_vector() + dp)
@@ -384,9 +386,6 @@ class SequenceTIC(ATMAlgorithm):
 
     def run(self, images, initial_shapes, gt_shapes=None, max_iters=20,
             prior=False):
-        # pre-compute stacked Jacobian
-        seq_j = np.tile(self.j, [len(images), 1])
-
         # initialize cost
         costs = []
         # initialize transform
@@ -414,10 +413,7 @@ class SequenceTIC(ATMAlgorithm):
                 if hasattr(self.transform, 'jp'):
                     jps.append(self.transform.jp())
 
-            es = np.vstack(es).T
-            # compute gauss-newton parameter updates
-
-            dp = self.interface.seq_solve(self.h, seq_j, es, jps, prior)
+            dp = self.interface.seq_solve(self.h, self.j, es, jps, prior)
 
             # update transform
             # make sure the REFERENCE to the shape parameters list changes,
@@ -430,14 +426,124 @@ class SequenceTIC(ATMAlgorithm):
 
             seq_shape_parameters.append(shape_parameters)
 
-            # test convergence
-            # error = np.abs(np.linalg.norm(
-            #     target.points - self.transform.target.points))
-            # if error < self.eps:
-            #     break
+            # save cost (sum of squared errors)
+            costs.append([e.T.dot(e) for e in es])
+
+        # return aam algorithm result
+        costs = [c for c in zip(*costs)]
+        seq_shape_parameters = [sp for sp in zip(*seq_shape_parameters)]
+        algorithm_results = []
+        for k, (im, s_params, cs) in enumerate(zip(images, seq_shape_parameters,
+                                                   costs)):
+            if gt_shapes:
+                gt = gt_shapes[k]
+            else:
+                gt = None
+            algorithm_results.append(self.interface.algorithm_result(
+                im, s_params, cs, gt_shape=gt))
+        return algorithm_results
+
+
+class ConstrainedSequenceTIC(ATMAlgorithm):
+    r"""
+    Template Inverse Compositional Gauss-Newton Algorithm
+    """
+    def __init__(self, atm_interface, template, transform,
+                 eps=10**-5, **kwargs):
+
+        self.landmark_weight = np.sqrt(kwargs.pop('landmark_weight', 1.0))
+        self.data_weight = np.sqrt(kwargs.pop('data_weight', 1.0))
+
+        # call super constructor
+        super(ConstrainedSequenceTIC, self).__init__(
+            atm_interface, template, transform, eps, **kwargs)
+
+        # pre-compute
+        self._precompute()
+
+    def _precompute(self):
+        self._dw_dp = self.interface.dw_dp()
+        self.nabla_t = self.interface.gradient(self.template)
+        self.vec_template = self.template.as_vector()[self.interface.image_vec_mask]
+        self.j = self.interface.steepest_descent_images(self.nabla_t,
+                                                        self._dw_dp)
+        self.h = self.j.T.dot(self.j)
+
+        # B
+        self.j_nr = np.vstack([self.data_weight * self.j,
+                               self.landmark_weight * self.transform.V.T])
+        # pinv(B)
+        self.j_nr_inv = np.linalg.pinv(self.j_nr)
+
+        U, _, _ = np.linalg.svd(self.j_nr, full_matrices=False)
+        self.U = U[:, :10]
+
+    def run(self, images, initial_shapes, gt_shapes=None, max_iters=20,
+            prior=False):
+        # initialize cost
+        costs = []
+
+        # initialize transform
+        gt_s_vs = [gt.as_vector() for gt in gt_shapes]
+
+        shape_parameters = []
+        for ish in initial_shapes:
+            self.transform.set_target(ish)
+            shape_parameters.append(self.transform.as_vector())
+
+        seq_shape_parameters = [shape_parameters]
+        im_vec_mask = self.interface.image_vec_mask
+
+        n_frames = len(images)
+        dp = np.zeros([len(shape_parameters[0]), n_frames])
+
+        for _ in xrange(max_iters):
+            es = []
+            jps = []
+            gt_ds = []
+            for im, ps, gt_s_v in zip(images, shape_parameters, gt_s_vs):
+                self.transform.from_vector_inplace(ps)
+                # warp the image
+                i = self.interface.warp(im)
+                # mask image
+                masked_i = i.as_vector()[im_vec_mask]
+
+                # compute error image
+                es.append(self.vec_template - masked_i)
+                if hasattr(self.transform, 'jp'):
+                    jps.append(self.transform.jp())
+                # compute the landmark error
+                gt_ds.append(gt_s_v - self.transform.sparse_target.points.ravel())
+
+            # Calculate delta_p
+            e_tots = [np.hstack([self.data_weight * e,
+                                self.landmark_weight * gt_d])
+                      for e, gt_d in zip(es, gt_ds)]
+            # dp = self.interface.seq_solve(self.h_nr, self.j_nr, e_tots, jps,
+            #                               prior)
+
+            for k, A in enumerate(e_tots):
+                # U, S, V = np.linalg.svd(B, full_matrices=False)
+                # tmp = np.linalg.inv(np.diag(S)).dot(U.T.dot(A))
+                # U1, S1, V1 = np.linalg.svd(tmp, full_matrices=False)
+                # diagS = np.diag(S1)
+                # svp = sum(diagS > 1.5)
+                # C_hat = U1[:, :svp].dot(np.diag(diagS[:svp] - 1.5)).dot(V1[:, :svp].T)
+                # dp[:, k] = V.dot(C_hat)
+                # C = pinv(B)*(U*U'*A);
+                dp[:, k] = self.j_nr_inv.dot(self.U.dot(self.U.T.dot(A)))
+
+            # make sure the REFERENCE to the shape parameters list changes,
+            # so that we can update it for our list of lists
+            new_shape_parameters = []
+            for k in range(n_frames):
+                new_shape_parameters.append(shape_parameters[k] + dp[:, k])
+            shape_parameters = new_shape_parameters
+
+            seq_shape_parameters.append(shape_parameters)
 
             # save cost (sum of squared errors)
-            costs.append(np.diag(es.T.dot(es)))
+            costs.append([e.T.dot(e) for e in es])
 
         # return aam algorithm result
         costs = [c for c in zip(*costs)]

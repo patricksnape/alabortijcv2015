@@ -369,6 +369,6 @@ def sparse_landmark_indices_from_dense(dense_landmarks, sparse_lmarks):
         if i not in uniq_indices_set:
             uniq_indices_set.add(i)
             uniq_indices_list.append(i)
-            sparse_landmark_mask[k] = i
+            sparse_landmark_mask[k] = True
 
     return np.array(uniq_indices_list), sparse_landmark_mask

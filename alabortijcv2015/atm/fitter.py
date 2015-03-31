@@ -1,4 +1,5 @@
 from __future__ import division
+from skimage.morphology import binary_erosion, disk
 
 from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
@@ -8,6 +9,7 @@ from menpo.transform import (Scale, AlignmentAffine, UniformScale,
                              AlignmentSimilarity)
 from menpo.visualize import print_dynamic
 from menpo.shape import PointCloud
+from menpo.image import BooleanImage
 from menpofit.base import noisy_align
 from .result import ATMFitterResult, LinearATMFitterResult
 
@@ -162,7 +164,7 @@ class LinearATMFitter(ATMFitter):
         # mask that is slightly too small to deal with this, or
         # model based interpolation should be performed using the
         # next shape model
-        current_shape_im = current_shape_im.zoom(1.02)
+        current_shape_im = current_shape_im.zoom(1.1)
         # Warp the image up to interpolate
         current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
             self.dm.reference_frames[level + 1].mask,
@@ -249,29 +251,6 @@ class LinearATMFitter(ATMFitter):
             print_dynamic('Finished Scale {}'.format(j))
 
         return [r for r in zip(*seq_algorithm_results)]
-
-    def fit_constrained(self, image, gt_sparse_shape, initial_shape,
-                        max_iters=50, crop_image=None, **kwargs):
-        # generate the list of images to be fitted
-        images, initial_shapes, gt_shapes = self._prepare_image(
-            image, initial_shape, gt_shape=gt_sparse_shape,
-            crop_image=crop_image)
-
-        # work out the affine transform between the initial shape of the
-        # highest pyramidal level and the initial shape of the original image
-        affine_correction = AlignmentAffine(initial_shapes[-1], initial_shape)
-
-        # run multilevel fitting
-        algorithm_results = self._fit(images, initial_shapes[0],
-                                      max_iters=max_iters,
-                                      gt_shapes=gt_shapes, **kwargs)
-
-        # build multilevel fitting result
-        fitter_result = self._fitter_result(
-            image, algorithm_results, affine_correction,
-            gt_shape=gt_sparse_shape)
-
-        return fitter_result
 
     def fit_constrained_sequence(self, images, sparse_shapes, initial_shapes,
                                  max_iters=50, gt_shapes=None, crop_image=None,
