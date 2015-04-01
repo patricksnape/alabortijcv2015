@@ -472,6 +472,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         # B
         self.j_nr = np.vstack([self.data_weight * self.j,
                                self.landmark_weight * self.transform.V.T])
+        self.h_nr = self.j_nr.T.dot(self.j_nr)
         # pinv(B)
         self.j_nr_inv = np.linalg.pinv(self.j_nr)
 
@@ -519,10 +520,10 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
             e_tots = [np.hstack([self.data_weight * e,
                                 self.landmark_weight * gt_d])
                       for e, gt_d in zip(es, gt_ds)]
-            # dp = self.interface.seq_solve(self.h_nr, self.j_nr, e_tots, jps,
-            #                               prior)
+            dp = self.interface.seq_solve(self.h_nr, self.j_nr, e_tots, jps,
+                                          prior)
 
-            for k, A in enumerate(e_tots):
+            #for k, A in enumerate(e_tots):
                 # U, S, V = np.linalg.svd(B, full_matrices=False)
                 # tmp = np.linalg.inv(np.diag(S)).dot(U.T.dot(A))
                 # U1, S1, V1 = np.linalg.svd(tmp, full_matrices=False)
@@ -531,15 +532,24 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                 # C_hat = U1[:, :svp].dot(np.diag(diagS[:svp] - 1.5)).dot(V1[:, :svp].T)
                 # dp[:, k] = V.dot(C_hat)
                 # C = pinv(B)*(U*U'*A);
-                dp[:, k] = self.j_nr_inv.dot(self.U.dot(self.U.T.dot(A)))
+                #dp[:, k] = self.j_nr_inv.dot(self.U.dot(self.U.T.dot(A)))
+
 
             # make sure the REFERENCE to the shape parameters list changes,
             # so that we can update it for our list of lists
             new_shape_parameters = []
             for k in range(n_frames):
                 new_shape_parameters.append(shape_parameters[k] + dp[:, k])
-            shape_parameters = new_shape_parameters
 
+            C = np.vstack(new_shape_parameters).T
+            U, S, V = np.linalg.svd(C, full_matrices=False)
+            S[S < 20] = 0
+            C = U.dot(np.diag(S).dot(V))
+
+            for k in range(n_frames):
+                new_shape_parameters[k] = C[:, k]
+
+            shape_parameters = new_shape_parameters
             seq_shape_parameters.append(shape_parameters)
 
             # save cost (sum of squared errors)
