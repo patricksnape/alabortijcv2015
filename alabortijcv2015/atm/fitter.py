@@ -179,8 +179,7 @@ class LinearATMFitter(ATMFitter):
 
     @property
     def reference_shape(self):
-        return PointCloud(self.dm.reference_frames[0].as_vector(
-            keep_channels=True).T)
+        return self.dm.reference_shape
 
     def perturb_sparse_shape(self, gt_shape, noise_std=0.04, rotation=False):
         reference_shape = self.reference_shape

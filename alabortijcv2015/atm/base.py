@@ -2,6 +2,7 @@ from __future__ import division
 import numpy as np
 
 from menpo.shape import PointCloud
+from alabortijcv2015.atm.builder import zero_flow_grid_pcloud
 from alabortijcv2015.builder import build_reference_frame
 
 
@@ -143,17 +144,15 @@ class LinearGlobalATM(ATM):
 
     @property
     def reference_shape(self):
-        return PointCloud(self.reference_frames[0].as_vector(
-            keep_channels=True).T)
+        return zero_flow_grid_pcloud(self.reference_frames[0].shape,
+                                     mask=self.reference_frames[0].mask)
 
     @property
     def dense_reference_shape(self):
-        return PointCloud(self.reference_frames[0].as_vector(
-            keep_channels=True).T)
+        return self.reference_shape
 
     @property
     def sparse_reference_shape(self):
         if self.dense_indices is None:
             raise ValueError('Model not built with known sparse landmarks.')
-        return PointCloud(self.reference_frames[0].as_vector(
-            keep_channels=True).T).from_mask(self.dense_indices[0])
+        return self.reference_shape.from_mask(self.dense_indices[0])
