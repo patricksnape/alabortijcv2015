@@ -481,6 +481,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
 
     def run(self, images, initial_shapes, gt_shapes=None, max_iters=20,
             prior=False):
+        from research_utils.robust_pca import rpca_alm
         # initialize cost
         costs = []
 
@@ -498,7 +499,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         n_frames = len(images)
         dp = np.zeros([len(shape_parameters[0]), n_frames])
 
-        for _ in xrange(max_iters):
+        for it in xrange(max_iters):
             es = []
             jps = []
             gt_ds = []
@@ -542,9 +543,13 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                 new_shape_parameters.append(shape_parameters[k] + dp[:, k])
 
             C = np.vstack(new_shape_parameters).T
-            U, S, V = np.linalg.svd(C, full_matrices=False)
-            S[S < 20] = 0
-            C = U.dot(np.diag(S).dot(V))
+            # U, S, V = np.linalg.svd(C[4:, :], full_matrices=False)
+            # svdp = sum(S > 1.5)
+            # C1 = U[:, :svdp].dot(np.diag(S)[:svdp, :svdp].dot(V[:, :svdp].T))
+
+            if it % 5 == 0:
+                C1, _ = rpca_alm(C[4:, :], verbose=False)
+                C[4:, :] = C1
 
             for k in range(n_frames):
                 new_shape_parameters[k] = C[:, k]
