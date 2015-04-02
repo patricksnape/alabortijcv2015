@@ -436,8 +436,10 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
                                    template.landmarks[group].lms)
 
         # warp template to reference frame
-        warped_template = template.as_unmasked().warp_to_mask(ref_frame.mask,
-                                                              transform)
+        if isinstance(template, MaskedImage):
+            template = template.as_unmasked()
+        warped_template = template.warp_to_mask(ref_frame.mask,
+                                                transform)
         warped_template.landmarks['source'] = ref_frame.landmarks[group]
 
         return warped_template
