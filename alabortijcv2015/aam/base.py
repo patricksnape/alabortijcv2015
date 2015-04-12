@@ -7,7 +7,10 @@ import numpy as np
 from menpo.shape import TriMesh
 from menpo.transform import Translation
 from menpo.image import MaskedImage
-from alabortijcv2015.builder import build_reference_frame
+from alabortijcv2015.atm.builder import zero_flow_grid_pcloud
+from alabortijcv2015.builder import build_reference_frame, \
+    build_patch_reference_frame
+from menpo.transform.piecewiseaffine.base import CythonPWA
 
 from menpofit.transform import DifferentiableThinPlateSplines
 
@@ -146,10 +149,9 @@ class GlobalAAM(AAM):
 
     def _build_reference_frame(self, reference_shape, landmarks):
         if type(landmarks) == TriMesh:
-            trilist = landmarks.trilist
-        else:
-            trilist = None
-        return build_reference_frame(reference_shape, trilist=trilist)
+            reference_shape = TriMesh(reference_shape.points,
+                                      landmarks.trilist)
+        return build_reference_frame(reference_shape)
 
 
 class PatchAAM(AAM):
@@ -192,43 +194,54 @@ class PatchAAM(AAM):
 
 class LinearGlobalAAM(AAM):
 
-    def __init__(self, shape_models, appearance_models, reference_shape,
-                 transform, features, sigma, scales, scale_shapes,
-                 scale_features, n_landmarks):
+    def __init__(self, shape_models, appearance_models, reference_frames,
+                 features, sigma, scales, scale_features, dense_indices=None,
+                 sparse_masks=None):
 
         self.shape_models = shape_models
         self.appearance_models = appearance_models
-        self.transform = transform
         self.features = features
-        self.reference_shape = reference_shape
+        self.reference_frames = reference_frames
         self.sigma = sigma
         self.scales = scales
-        self.scale_shapes = scale_shapes
         self.scale_features = scale_features
-        self.n_landmarks = n_landmarks
+        self.dense_indices = dense_indices
+        self.sparse_masks = sparse_masks
 
     def _instance(self, level, shape_instance, appearance_instance):
-        template = self.appearance_models[level].mean()
-        landmarks = template.landmarks['source'].lms
+        landmarks = zero_flow_grid_pcloud(
+            self.reference_frames[level].shape,
+            mask=self.reference_frames[level].mask,
+            triangulated=True)
 
-        reference_frame = self._build_reference_frame(
-            shape_instance, landmarks)
+        shape_instance = TriMesh(shape_instance.points,
+                                 trilist=landmarks.trilist)
 
-        transform = self.transform(
-            reference_frame.landmarks['source'].lms, landmarks)
+        reference_frame = build_reference_frame(shape_instance)
+
+        transform = CythonPWA(reference_frame.landmarks['source'].lms,
+                              landmarks)
 
         instance = appearance_instance.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform, batch_size=3000)
+            reference_frame.mask, transform)
         instance.landmarks = reference_frame.landmarks
 
         return instance
 
-    def _build_reference_frame(self, reference_shape, landmarks):
-        if type(landmarks) == TriMesh:
-            trilist = landmarks.trilist
-        else:
-            trilist = None
-        return build_reference_frame(reference_shape, trilist=trilist)
+    @property
+    def reference_shape(self):
+        return zero_flow_grid_pcloud(self.reference_frames[0].shape,
+                                     mask=self.reference_frames[0].mask)
+
+    @property
+    def dense_reference_shape(self):
+        return self.reference_shape
+
+    @property
+    def sparse_reference_shape(self):
+        if self.dense_indices is None:
+            raise ValueError('Model not built with known sparse landmarks.')
+        return self.reference_shape.from_mask(self.dense_indices[0])
 
 
 class LinearPatchAAM(AAM):

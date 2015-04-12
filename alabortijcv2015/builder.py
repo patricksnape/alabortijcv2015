@@ -73,7 +73,7 @@ def compute_features(images, verbose=True, features=None):
     for c, i in enumerate(images):
         if verbose:
             print_dynamic(
-                ' - Computing feature space: {}'.format(
+                '- Computing feature space: {}'.format(
                     progress_bar_str((c + 1.) / len(images), show_bar=False)))
         if features:
             i = features(i)
@@ -87,7 +87,7 @@ def scale_images(images, s, verbose=True):
     for c, i in enumerate(images):
         if verbose:
             print_dynamic(
-                ' - Scaling features: {}'.format(
+                '- Scaling features: {}'.format(
                     progress_bar_str((c + 1.) / len(images), show_bar=False)))
         scaled_images.append(i.rescale(s))
     return scaled_images
@@ -148,7 +148,7 @@ def build_appearance_model(images, max_components):
 
 
 def build_reference_frame(landmarks, boundary=3, group='source',
-                          point_in_pointcloud='convex_hull'):
+                          point_in_pointcloud='pwa', batch_size=None):
     r"""
     Builds a reference frame from a particular set of landmarks.
 
@@ -173,7 +173,8 @@ def build_reference_frame(landmarks, boundary=3, group='source',
                                              group=group)
 
     reference_frame.constrain_mask_to_landmarks(
-        group=group, point_in_pointcloud=point_in_pointcloud)
+        group=group, point_in_pointcloud=point_in_pointcloud,
+        batch_size=batch_size)
 
     return reference_frame
 

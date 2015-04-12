@@ -1,13 +1,13 @@
 from __future__ import division
 import numpy as np
 
-from menpo.shape import PointCloud
 from alabortijcv2015.atm.builder import zero_flow_grid_pcloud
 from alabortijcv2015.builder import build_reference_frame
 
 
-# Abstract Interface for ATM Objects ------------------------------------------
-from menpo.image import MaskedImage
+# Abstract Interface for ATM Objects -------------------------------------------
+from menpo.shape import TriMesh
+from menpo.transform.piecewiseaffine.base import CythonPWA
 
 
 class ATM(object):
@@ -128,19 +128,24 @@ class LinearGlobalATM(ATM):
         self.sparse_masks = sparse_masks
 
     def _instance(self, level, shape_instance, template):
-        from .builder import zero_flow_grid_pcloud
-        #landmarks = template.landmarks['source'].lms
+        landmarks = zero_flow_grid_pcloud(
+            self.reference_frames[level].shape,
+            mask=self.reference_frames[level].mask,
+            triangulated=True)
 
-        ref_frame = self.reference_frames[level]
+        shape_instance = TriMesh(shape_instance.points,
+                                 trilist=landmarks.trilist)
 
-        warped_template = MaskedImage.init_blank(ref_frame.shape,
-                                                 mask=ref_frame.mask,
-                                                 n_channels=template.n_channels)
-        warped_template.from_vector_inplace(
-            template.as_unmasked().sample(shape_instance.points).ravel())
-        warped_template.landmarks['source'] = shape_instance
+        reference_frame = build_reference_frame(shape_instance)
 
-        return warped_template
+        transform = CythonPWA(reference_frame.landmarks['source'].lms,
+                              landmarks)
+
+        instance = template.as_unmasked().warp_to_mask(
+            reference_frame.mask, transform)
+        instance.landmarks = reference_frame.landmarks
+
+        return instance
 
     @property
     def reference_shape(self):

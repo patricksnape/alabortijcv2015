@@ -1,15 +1,13 @@
 from __future__ import division
-from skimage.morphology import binary_erosion, disk
 
 from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
 
 from .algorithm import StandardATMInterface, LinearATMInterface, TIC
 from menpo.transform import (Scale, AlignmentAffine, UniformScale,
-                             AlignmentSimilarity)
+                             AlignmentSimilarity, ThinPlateSplines)
 from menpo.visualize import print_dynamic
 from menpo.shape import PointCloud
-from menpo.image import BooleanImage
 from menpofit.base import noisy_align
 from .result import ATMFitterResult, LinearATMFitterResult
 
@@ -188,6 +186,27 @@ class LinearATMFitter(ATMFitter):
                                       transform.sparse_target)
         transform.set_target(gt_to_m.apply(gt_shape))
         scaled_target = gt_to_m.pseudoinverse().apply(transform.dense_target)
+        return noisy_align(reference_shape, scaled_target,
+                           noise_std=noise_std,
+                           rotation=rotation).apply(reference_shape)
+
+    def _tps_from_gt(self, gt_lmarks, min_singular_val=1.0):
+        tps_warp = ThinPlateSplines(
+            self.dm.reference_frames[0].landmarks['source'].lms,
+            gt_lmarks, min_singular_val=min_singular_val)
+        true_indices = self.dm.reference_frames[0].mask.true_indices()
+        warped_grid = tps_warp.apply(true_indices)
+        return PointCloud(warped_grid)
+
+    def perturb_sparse_shape_tps(self, gt_shape, noise_std=0.04, rotation=False,
+                                 min_singular_val=1.0):
+        reference_shape = self.reference_shape
+        transform = self._algorithms[0].transform
+        gt_to_m = AlignmentSimilarity(gt_shape.from_mask(transform.sparse_mask),
+                                      transform.sparse_target)
+        transform.set_target(gt_to_m.apply(gt_shape))
+        scaled_target = self._tps_from_gt(gt_shape,
+                                          min_singular_val=min_singular_val)
         return noisy_align(reference_shape, scaled_target,
                            noise_std=noise_std,
                            rotation=rotation).apply(reference_shape)
