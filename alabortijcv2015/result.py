@@ -386,13 +386,35 @@ class FitterResult(Result):
 
 class SerializableResult(Result):
 
-    def __init__(self, image_path, shapes, n_iters, algorithm, gt_shape=None):
-        self._image_path = image_path
-        self._image = None
-        self._gt_shape = gt_shape
+    def __init__(self, image, shapes, n_iters, algorithm, gt_shapes=None):
+        self._image = image
         self._shapes = shapes
         self._n_iters = n_iters
+        self._gt_shapes = gt_shapes
         self.algorithm = str(algorithm)
+
+    @property
+    def gt_shape(self):
+        if self._gt_shapes is None:
+            return None
+        return self._gt_shapes[-1].copy()
+
+    @property
+    def final_gt_shape(self):
+        return self.gt_shape
+
+    def gt_shapes(self, as_points=False):
+        if as_points:
+            shapes = [s.points.copy() for s in self._gt_shapes]
+        else:
+            shapes = self._gt_shapes
+        return shapes
+
+    @property
+    def initial_gt_shape(self):
+        if self._gt_shapes is None:
+            return None
+        return self._gt_shapes[0].copy()
 
     @property
     def n_iters(self):
@@ -400,24 +422,19 @@ class SerializableResult(Result):
 
     def shapes(self, as_points=False):
         if as_points:
-            return [s.points for s in self._shapes]
+            return [s.points.copy() for s in self._shapes]
         else:
             return self._shapes
 
     @property
     def initial_shape(self):
-        return self._shapes[0]
+        return self._shapes[0].copy()
 
     @property
     def final_shape(self):
-        return self._shapes[-1]
+        return self._shapes[-1].copy()
 
     @property
     def image(self):
-        if self._image is None:
-            image = mio.import_image(self._image_path)
-            image.crop_to_landmarks_proportion_inplace(0.5)
-            self._image = image
-
         return self._image
 

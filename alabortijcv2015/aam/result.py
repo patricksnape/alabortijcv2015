@@ -143,9 +143,9 @@ class LinearAAMFitterResult(AAMFitterResult):
 class SerializableAAMFitterResult(SerializableResult):
 
     def __init__(self, image_path, shapes, costs, n_iters, algorithm,
-                 gt_shape=None):
+                 gt_shapes=None):
         super(SerializableAAMFitterResult, self).__init__(
-            image_path, shapes, n_iters, algorithm, gt_shape=gt_shape)
+            image_path, shapes, n_iters, algorithm, gt_shapes=gt_shapes)
 
         self._costs = costs
 
