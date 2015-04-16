@@ -457,10 +457,18 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
                                sparse_masks=sparse_masks)
 
 
-def pointclouds_from_uv(u, v):
-    return [PointCloud(np.vstack([v1, u1]).T)
-            for u1, v1 in zip(u.as_vector(keep_channels=True),
-                              v.as_vector(keep_channels=True))]
+def pointclouds_from_uv(u, v, add_zero=False):
+    if add_zero:
+        zero = zero_flow_grid_pcloud(u.shape).points
+
+    pclouds = []
+    for u1, v1 in zip(u.as_vector(keep_channels=True),
+                      v.as_vector(keep_channels=True)):
+        if add_zero:
+            u1 = u1 + zero[:, 1]
+            v1 = v1 + zero[:, 0]
+        pclouds.append(PointCloud(np.vstack([v1, u1]).T))
+    return pclouds
 
 
 def grid_triangulation(shape):
