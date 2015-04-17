@@ -1,12 +1,10 @@
 from __future__ import division
-from copy import copy
 
 import numpy as np
 import scipy
 from scipy.sparse import block_diag
 
 from menpo.feature import gradient as fast_gradient
-from menpo.transform import Similarity
 
 from .result import ATMAlgorithmResult, LinearATMAlgorithmResult
 
@@ -453,6 +451,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
 
         self.landmark_weight = np.sqrt(kwargs.pop('landmark_weight', 1.0))
         self.data_weight = np.sqrt(kwargs.pop('data_weight', 1.0))
+        self.robust_lambda = kwargs.pop('robust_lambda', None)
 
         # call super constructor
         super(ConstrainedSequenceTIC, self).__init__(
@@ -497,7 +496,6 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         im_vec_mask = self.interface.image_vec_mask
 
         n_frames = len(images)
-        dp = np.zeros([len(shape_parameters[0]), n_frames])
 
         for it in xrange(max_iters):
             es = []
@@ -524,18 +522,6 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
             dp = self.interface.seq_solve(self.h_nr, self.j_nr, e_tots, jps,
                                           prior)
 
-            #for k, A in enumerate(e_tots):
-                # U, S, V = np.linalg.svd(B, full_matrices=False)
-                # tmp = np.linalg.inv(np.diag(S)).dot(U.T.dot(A))
-                # U1, S1, V1 = np.linalg.svd(tmp, full_matrices=False)
-                # diagS = np.diag(S1)
-                # svp = sum(diagS > 1.5)
-                # C_hat = U1[:, :svp].dot(np.diag(diagS[:svp] - 1.5)).dot(V1[:, :svp].T)
-                # dp[:, k] = V.dot(C_hat)
-                # C = pinv(B)*(U*U'*A);
-                #dp[:, k] = self.j_nr_inv.dot(self.U.dot(self.U.T.dot(A)))
-
-
             # make sure the REFERENCE to the shape parameters list changes,
             # so that we can update it for our list of lists
             new_shape_parameters = []
@@ -543,12 +529,10 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                 new_shape_parameters.append(shape_parameters[k] + dp[:, k])
 
             C = np.vstack(new_shape_parameters).T
-            # U, S, V = np.linalg.svd(C[4:, :], full_matrices=False)
-            # svdp = sum(S > 1.5)
-            # C1 = U[:, :svdp].dot(np.diag(S)[:svdp, :svdp].dot(V[:, :svdp].T))
 
             if it % 5 == 0:
-                C1, _ = rpca_alm(C[4:, :], verbose=False)
+                C1, E = rpca_alm(C[4:, :], verbose=False,
+                                 lmbda=self.robust_lambda)
                 C[4:, :] = C1
 
             for k in range(n_frames):
