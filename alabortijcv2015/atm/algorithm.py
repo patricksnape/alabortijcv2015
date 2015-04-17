@@ -5,7 +5,7 @@ import scipy
 from scipy.sparse import block_diag
 
 from menpo.feature import gradient as fast_gradient
-
+from ..robust_pca import rpca_alm
 from .result import ATMAlgorithmResult, LinearATMAlgorithmResult
 
 
@@ -480,7 +480,6 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
 
     def run(self, images, initial_shapes, gt_shapes=None, max_iters=20,
             prior=False):
-        from research_utils.robust_pca import rpca_alm
         # initialize cost
         costs = []
 
