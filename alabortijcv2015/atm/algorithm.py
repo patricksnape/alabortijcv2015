@@ -454,7 +454,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         self.landmark_weight = np.sqrt(kwargs.pop('landmark_weight', 1.0))
         self.data_weight = np.sqrt(kwargs.pop('data_weight', 1.0))
         self.n_alternations = kwargs.pop('n_alternations', 3)
-        self.lmda = kwargs.pop('lmda', 0.01)
+        self.lmda = kwargs.pop('lmda', [0]).pop(0)
 
         # call super constructor
         super(ConstrainedSequenceTIC, self).__init__(

@@ -1,4 +1,7 @@
 from __future__ import division
+import numpy as np
+from scipy.ndimage import binary_dilation, binary_erosion
+from scipy.spatial.distance import cdist
 
 from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
@@ -8,6 +11,7 @@ from menpo.transform import (Scale, AlignmentAffine, UniformScale,
                              AlignmentSimilarity, ThinPlateSplines)
 from menpo.visualize import print_dynamic
 from menpo.shape import PointCloud
+from menpo.image import BooleanImage
 from menpofit.base import noisy_align
 from .result import ATMFitterResult, LinearATMFitterResult
 
@@ -88,8 +92,8 @@ class ATMFitter(Fitter):
 
             if s != self.scales[-1]:
                 shapes = []
-                for alg in algorithm_results:
-                    sh = alg.final_shape
+                for a in algorithm_results:
+                    sh = a.final_shape
                     Scale(self.scales[j + 1] / s,
                           n_dims=sh.n_dims).apply_inplace(sh)
                     shapes.append(sh)
@@ -155,14 +159,37 @@ class LinearATMFitter(ATMFitter):
 
     def _interpolate_shape(self, shape, level, scale):
         # Create an image from the final shape for interpolation
-        current_shape_im = self.dm.reference_frames[level].from_vector(
+        c_ref = self.dm.reference_frames[level]
+        current_shape_im = c_ref.from_vector(
             shape.points.T.ravel(), n_channels=2)
-        # TODO: lazily 'zoom' into the image to stop interpolation
-        # issues at the boundaries. Really the image should have a
-        # mask that is slightly too small to deal with this, or
-        # model based interpolation should be performed using the
-        # next shape model
-        current_shape_im = current_shape_im.zoom(1.1)
+
+        # TODO: This should probably be done at model building time - build
+        # the reference frame with a mask this is "too big" and then use a
+        # mask that is smaller so that sampling out of that mask will not
+        # result in incorrect values. This is a kind of manual "nearest
+        # neighbour" interpolation for non-rectangular masks.
+
+        # Create a 5 pixel wide "buffer" mask around the correct mask
+        d_mask = binary_dilation(c_ref.mask.mask, iterations=5)
+        np.logical_and(d_mask, ~c_ref.mask.mask, out=d_mask)
+        # Create a one pixel wide mask that is the boundary of the correct mask
+        one_pixel_b = binary_erosion(c_ref.mask.mask, iterations=1)
+        np.logical_and(~one_pixel_b, c_ref.mask.mask, out=one_pixel_b)
+
+        # Get the indices of these masks
+        o_indices = BooleanImage(one_pixel_b, copy=False).true_indices()
+        d_indices = BooleanImage(d_mask, copy=False).true_indices()
+
+        # Get the pairwise euclidean distances
+        dists = cdist(o_indices, d_indices)
+        # Choose the minimum entries
+        closest_index = np.argmin(dists, axis=0)
+        # Sample at the closest values
+        samples = current_shape_im.sample(o_indices[closest_index])
+        # Update the boundary area so that out of mask samples are interpolated
+        # correctly
+        current_shape_im.pixels[:, d_indices[:, 0], d_indices[:, 1]] = samples
+
         # Warp the image up to interpolate
         current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
             self.dm.reference_frames[level + 1].mask,
@@ -263,89 +290,8 @@ class LinearATMFitter(ATMFitter):
 
             if s != self.scales[-1]:
                 shapes = []
-                for alg in algorithm_results:
-                    sh = self._interpolate_shape(alg.final_dense_shape, j, s)
-                    shapes.append(sh)
-            print_dynamic('Finished Scale {}'.format(j))
-
-        return [r for r in zip(*seq_algorithm_results)]
-
-    def fit_constrained_sequence(self, images, sparse_shapes, initial_shapes,
-                                 max_iters=50, gt_shapes=None, crop_image=None,
-                                 **kwargs):
-        # generate the list of images to be fitted
-        prepared_objs = []
-        for k, (im, ish) in enumerate(zip(images, initial_shapes)):
-            if gt_shapes:
-                gt = gt_shapes[k]
-            else:
-                gt = None
-            prepared_objs.append(self._prepare_image(im, ish,
-                                                     gt_shape=gt,
-                                                     crop_image=crop_image))
-        # Group into the three types
-        # Then group each scale together for each type
-        for k in range(len(prepared_objs)):
-            o = prepared_objs[k]
-            if o[-1] is None:
-                prepared_objs[k] = (prepared_objs[k][0], prepared_objs[k][1], [])
-
-        seq_images, seq_initial_shapes, seq_gt_shapes = [zip(*obj)
-                                                         for obj in zip(*prepared_objs)]
-
-        # work out the affine transform between the initial shape of the
-        # highest pyramidal level and the initial shape of the original image
-        affine_corrections = [AlignmentAffine(sish, ish)
-                              for ish, sish in zip(initial_shapes,
-                                                   seq_initial_shapes[-1])]
-
-        # run multilevel fitting
-        algorithm_results = self._fit_sequence(seq_images,
-                                               seq_initial_shapes[0],
-                                               max_iters=max_iters,
-                                               seq_gt_shapes=seq_gt_shapes,
-                                               **kwargs)
-
-        # build multilevel fitting results
-        fitter_results = []
-        for k, (im, alg_res, aff_corr) in enumerate(zip(images,
-                                                        algorithm_results,
-                                                        affine_corrections)):
-            if gt_shapes:
-                gt_shape = gt_shapes[k]
-            else:
-                gt_shape = None
-            fitter_results.append(self._fitter_result(im, alg_res, aff_corr,
-                                                      gt_shape=gt_shape))
-
-        return fitter_results
-
-    def _fit_constrained_sequence(self, seq_images, seq_initial_shapes,
-                                  seq_gt_shapes=None, max_iters=50, **kwargs):
-        max_iters = self._prepare_max_iters(max_iters)
-
-        seq_algorithm_results = []
-        shapes = seq_initial_shapes
-        print_dynamic('Beginning Fitting...'.format(j))
-        for j, (ims, alg, it, s) in enumerate(zip(seq_images,
-                                                  self._algorithms,
-                                                  max_iters, self.scales)):
-            if seq_gt_shapes:
-                gt_shapes = seq_gt_shapes[j]
-            else:
-                gt_shapes = None
-
-            algorithm_results = alg.run(ims, shapes,
-                                        gt_shapes=gt_shapes,
-                                        max_iters=it, **kwargs)
-            seq_algorithm_results.append(algorithm_results)
-
-            if s != self.scales[-1]:
-                shapes = []
-                for alg in algorithm_results:
-                    sh = alg.final_shape
-                    Scale(self.scales[j + 1] / s,
-                          n_dims=sh.n_dims).apply_inplace(sh)
+                for a in algorithm_results:
+                    sh = self._interpolate_shape(a.final_dense_shape, j, s)
                     shapes.append(sh)
             print_dynamic('Finished Scale {}'.format(j))
 
