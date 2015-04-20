@@ -423,7 +423,7 @@ class OrthoLinearMDTransform(OrthoPDM, Transform):
             tiled_indices[1, :] += 1
             tiled_indices = tiled_indices.T.ravel()
             self.V = self.W[:, tiled_indices.ravel()]
-            self.pinv_V = np.linalg.pinv(self.V)
+            self.h_V = self.V.dot(self.V.T)
 
     @property
     def dense_target(self):
@@ -437,7 +437,8 @@ class OrthoLinearMDTransform(OrthoPDM, Transform):
         if target.n_points != self.target.n_points and self.sparse_mask is not None:
             # Densify
             subset = target.from_mask(self.sparse_mask)
-            target = np.dot(np.dot(subset.as_vector(), self.pinv_V), self.W)
+            c = np.linalg.solve(self.h_V, self.V.dot(subset.as_vector()))
+            target = c.dot(self.W)
             target = PointCloud(np.reshape(target, (-1, self.n_dims)))
         OrthoPDM.set_target(self, target)
 
