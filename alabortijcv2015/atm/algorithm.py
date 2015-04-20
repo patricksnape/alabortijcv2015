@@ -469,19 +469,20 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         self.vec_template = self.template.as_vector()[self.interface.image_vec_mask]
         self.j = self.interface.steepest_descent_images(self.nabla_t,
                                                         self._dw_dp)
+        self.j *= self.data_weight
         self.j_nr = self.j[:, 4:]
         self.j_s = self.j[:, :4]
 
-        self.b = self.transform.V.T
+        self.b = self.landmark_weight * self.transform.V.T
         self.b_nr = self.b[:, 4:]
         self.b_s = self.b[:, :4]
 
-        self.j_t = np.vstack([self.data_weight * self.j,
-                              self.landmark_weight * self.b])
+        self.j_t = np.vstack([self.j, self.b])
         self.j_t_nr = self.j_t[:, 4:]
         self.j_t_s = self.j_t[:, :4]
 
         self.h_t_s = self.j_t_s.T.dot(self.j_t_s)
+        self.h_t_nr = self.j_t_nr.T.dot(self.j_t_nr)
         self.pinv_t_nr = np.linalg.pinv(self.j_t_nr)
         self.U, self.S, self.V = np.linalg.svd(self.j_t_nr, full_matrices=False)
         self.US = np.linalg.inv(np.diag(self.S)).dot(self.U.T)
@@ -561,17 +562,26 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                     l_hat = gt_s - self.transform.sparse_target.points.ravel()
                     e_nr = np.hstack([self.data_weight * e_hat,
                                       self.landmark_weight * l_hat])
-                    # solution for rank(C) < lambda
-                    # c_nr[:, k] = self.pinv_t_nr.dot(self.U.dot(self.U.T.dot(e_nr)))
-                    new_es.append(e_nr)
+                    # Solution for data term only (no lambda)
+                    if self.lmda == 0:
+                        c_nr[:, k] = np.linalg.solve(self.h_t_nr,
+                                                     self.j_t_nr.T.dot(e_nr))
+                    else:
+                        # solution for rank(C) < lambda
+                        # c_nr[:, k] = self.pinv_t_nr.dot(
+                        #     self.U.dot(self.U.T.dot(e_nr)))
+                        new_es.append(e_nr)
                 # solution for lambda||C||_*
-                e_nr = np.vstack(new_es).T
-                projected_error = self.US.dot(e_nr)
-                U1, S1, V1 = np.linalg.svd(projected_error, full_matrices=False)
-                svp = sum(S1 > self.lmda)
-                thresh_S = np.diag(S1[:svp] - self.lmda)
-                recon_usv = U1[:, :svp].dot(thresh_S.dot(V1[:svp, :]))
-                c_nr[:] = self.V.T.dot(recon_usv)
+                if self.lmda > 0:
+                    e_nr = np.vstack(new_es).T
+                    projected_error = self.US.dot(e_nr)
+                    U1, S1, V1 = np.linalg.svd(projected_error,
+                                               full_matrices=False)
+                    svp = sum(S1 > self.lmda)
+                    thresh_S = np.diag(S1[:svp] - self.lmda)
+                    recon_usv = U1[:, :svp].dot(thresh_S.dot(V1[:svp, :]))
+                    c_nr[:] = self.V.T.dot(recon_usv)
+
                 # print('Cs', m, np.linalg.norm(c_s - c_s_prev))
                 # print('C_nr', m, np.linalg.norm(c_nr - c_nr_prev))
                 # c_s_prev = c_s.copy()
