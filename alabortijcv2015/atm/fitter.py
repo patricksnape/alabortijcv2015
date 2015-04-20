@@ -5,6 +5,7 @@ from scipy.spatial.distance import cdist
 
 from alabortijcv2015.fitter import Fitter
 from alabortijcv2015.transform import OrthoMDTransform, OrthoLinearMDTransform
+from alabortijcv2015.utils import fsmooth
 
 from .algorithm import StandardATMInterface, LinearATMInterface, TIC
 from menpo.transform import (Scale, AlignmentAffine, UniformScale,
@@ -33,15 +34,16 @@ class ATMFitter(Fitter):
             prepared_objs.append(self._prepare_image(im, ish,
                                                      gt_shape=gt,
                                                      crop_image=crop_image))
-        # Group into the three types
-        # Then group each scale together for each type
+        # Group into the three types (scaled images, scaled initial shapes,
+        # scaled ground truth)
         for k in range(len(prepared_objs)):
             o = prepared_objs[k]
+            # No ground truth shapes
             if o[-1] is None:
-                prepared_objs[k] = (prepared_objs[k][0], prepared_objs[k][1], [])
+                prepared_objs[k] = (o[0], o[1], [])
 
-        seq_images, seq_initial_shapes, seq_gt_shapes = [zip(*obj)
-                                                         for obj in zip(*prepared_objs)]
+        seq_images, seq_initial_shapes, seq_gt_shapes = [
+            zip(*obj) for obj in zip(*prepared_objs)]
 
         # work out the affine transform between the initial shape of the
         # highest pyramidal level and the initial shape of the original image
@@ -153,7 +155,7 @@ class LinearATMFitter(ATMFitter):
     def _mask_gt_shape(self, alg, gt_shape):
         if alg.transform.sparse_mask is not None:
             # Assume the GT is sparse
-            if gt_shape.n_points < alg.transform.dense_target.n_points:
+            if gt_shape.n_points == alg.transform.sparse_mask.shape[0]:
                 gt_shape = gt_shape.from_mask(alg.transform.sparse_mask)
         return gt_shape
 
@@ -204,10 +206,10 @@ class LinearATMFitter(ATMFitter):
 
     @property
     def reference_shape(self):
-        return self.dm.reference_shape
+        return self.dm.reference_shapes()[-1]
 
     def perturb_sparse_shape(self, gt_shape, noise_std=0.04, rotation=False):
-        reference_shape = self.reference_shape
+        reference_shape = self.dm.reference_shapes()[0]
         transform = self._algorithms[0].transform
         gt_to_m = AlignmentSimilarity(gt_shape.from_mask(transform.sparse_mask),
                                       transform.sparse_target)
@@ -227,11 +229,8 @@ class LinearATMFitter(ATMFitter):
 
     def perturb_sparse_shape_tps(self, gt_shape, noise_std=0.04, rotation=False,
                                  min_singular_val=1.0):
-        reference_shape = self.reference_shape
+        reference_shape = self.dm.reference_shapes()[0]
         transform = self._algorithms[0].transform
-        gt_to_m = AlignmentSimilarity(gt_shape.from_mask(transform.sparse_mask),
-                                      transform.sparse_target)
-        transform.set_target(gt_to_m.apply(gt_shape))
         scaled_target = self._tps_from_gt(gt_shape,
                                           min_singular_val=min_singular_val)
         return noisy_align(reference_shape, scaled_target,
@@ -296,3 +295,62 @@ class LinearATMFitter(ATMFitter):
             print_dynamic('Finished Scale {}'.format(j))
 
         return [r for r in zip(*seq_algorithm_results)]
+
+    def _prepare_image(self, image, initial_shape, gt_shape=None,
+                       crop_image=None):
+        # attach landmarks to the image
+        image.landmarks['initial_shape'] = initial_shape
+        if gt_shape:
+            image.landmarks['gt_shape'] = gt_shape
+
+        if crop_image:
+            image = image.copy()
+            image.crop_to_landmarks_proportion_inplace(crop_image,
+                                                       group='initial_shape')
+
+        # rescale image w.r.t the scale factor between reference_shape and
+        # initial_shape
+        # This is a bit more complicated because we have a different number
+        # of points in each reference shape per scale. Since this is supposed
+        # to normalize BEFORE computing the scales, we really want to normalize
+        # it to the scale space of the finest (largest) level, but we need
+        # to use the POINTS of the lowest. Therefore, we need to scaled the
+        # lowest points up to the SCALE of the finest (largest).
+        scaled_lowest_reference = UniformScale(
+            self.scales[-1] / self.scales[0],
+            n_dims=initial_shape.n_dims).apply(self.dm.reference_shapes()[0])
+
+        image = image.rescale_to_reference_shape(scaled_lowest_reference,
+                                                 group='initial_shape')
+        if self.sigma:
+            image.pixels = fsmooth(image.pixels, self.sigma)
+
+        # obtain image representation
+        from copy import deepcopy
+        scales = deepcopy(self.scales)
+        scales.reverse()
+        images = []
+        for j, s in enumerate(scales):
+            if j == 0:
+                # compute features at highest level
+                feature_image = self.features(image)
+            elif self.scale_features:
+                # scale features at other levels
+                feature_image = images[0].rescale(s)
+            else:
+                # scale image and compute features at other levels
+                scaled_image = image.rescale(s)
+                feature_image = self.features(scaled_image)
+            images.append(feature_image)
+        images.reverse()
+
+        # get initial shapes per level
+        initial_shapes = [i.landmarks['initial_shape'].lms for i in images]
+
+        # get ground truth shapes per level
+        if gt_shape:
+            gt_shapes = [i.landmarks['gt_shape'].lms for i in images]
+        else:
+            gt_shapes = None
+
+        return images, initial_shapes, gt_shapes

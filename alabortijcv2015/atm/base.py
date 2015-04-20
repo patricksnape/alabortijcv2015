@@ -149,8 +149,12 @@ class LinearGlobalATM(ATM):
 
     @property
     def reference_shape(self):
-        return zero_flow_grid_pcloud(self.reference_frames[0].shape,
-                                     mask=self.reference_frames[0].mask)
+        return self.reference_shapes()[0]
+
+    def reference_shapes(self):
+        return [zero_flow_grid_pcloud(self.reference_frames[k].shape,
+                                      mask=self.reference_frames[k].mask)
+                for k in range(len(self.reference_frames))]
 
     @property
     def dense_reference_shape(self):
