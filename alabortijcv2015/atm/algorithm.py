@@ -455,9 +455,9 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                  eps=10**-5, **kwargs):
 
         self.landmark_weight = np.sqrt(kwargs.pop('landmark_weight', 1.0))
-        self.data_weight = np.sqrt(kwargs.pop('data_weight', 1.0))
+        self.rank_weight = np.sqrt(kwargs.pop('rank_weight', 1.0))
         self.n_alternations = kwargs.pop('n_alternations', 3)
-        self.lmda = kwargs.pop('lmda', [0]).pop(0)
+        self.lamda = kwargs.pop('lamda', [0]).pop(0)
 
         # call super constructor
         super(ConstrainedSequenceTIC, self).__init__(
@@ -472,25 +472,16 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         self.vec_template = self.template.as_vector()[self.interface.image_vec_mask]
         self.j = self.interface.steepest_descent_images(self.nabla_t,
                                                         self._dw_dp)
-        self.j *= self.data_weight
-        self.j_nr = self.j[:, 4:]
-        self.j_s = self.j[:, :4]
 
-        self.b = self.landmark_weight * self.transform.V.T
-        self.b_nr = self.b[:, 4:]
-        self.b_s = self.b[:, :4]
-
-        self.j_t = np.vstack([self.j, self.b])
-        self.j_t_nr = self.j_t[:, 4:]
-        self.j_t_s = self.j_t[:, :4]
-
-        self.h_t_s = self.j_t_s.T.dot(self.j_t_s)
-        self.h_t_nr = self.j_t_nr.T.dot(self.j_t_nr)
-        self.pinv_t_nr = np.linalg.pinv(self.j_t_nr)
-        self.U, self.S, self.V = np.linalg.svd(self.j_t_nr, full_matrices=False)
-        self.U = self.U[:, :self.lmda]
-        # for ||C||_*
-        #self.US = np.linalg.inv(np.diag(self.S)).dot(self.U.T)
+        # B
+        self.n_params = self.j.shape[1]
+        self.n_nr_params = self.n_params - 4
+        self.p_nr = np.hstack([np.zeros([self.n_nr_params, 4]),
+                               np.eye(self.n_nr_params)])
+        self.j_t = np.vstack([self.j,
+                              self.landmark_weight * self.transform.V.T,
+                              self.rank_weight * self.p_nr])
+        self.h_t = self.j_t.T.dot(self.j_t)
 
     def run(self, images, initial_shapes, gt_shapes=None, max_iters=20,
             prior=False):
@@ -509,104 +500,60 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         im_vec_mask = self.interface.image_vec_mask
 
         n_frames = len(images)
-        n_params = len(shape_parameters[0])
-        n_nr_params = n_params - 4
-        c_s = np.zeros([4, n_frames])
-        c_nr = np.zeros([n_nr_params, n_frames])
+        c_tilde = np.zeros((self.n_nr_params, n_frames))
 
         for it in xrange(max_iters):
-            es = []
-            jps = []
-            for im, ps, gt_s in zip(images, shape_parameters, gt_s_vs):
-                self.transform.from_vector_inplace(ps)
-                # warp the image
-                i = self.interface.warp(im)
-                # mask image
-                masked_i = i.as_vector()[im_vec_mask]
-
-                # compute error image
-                es.append(self.vec_template - masked_i)
-                if hasattr(self.transform, 'jp'):
-                    jps.append(self.transform.jp())
-
-            # Alternate and solve for similarity and non-rigid
             c_hat = np.vstack(shape_parameters).T
-            c_s_hat = c_hat[:4]
-            c_nr_hat = c_hat[4:]
-            r_hat = self.j_nr.dot(c_nr_hat) + self.j_s.dot(c_s_hat)
-            # Initialize current solution with previous solution
-            c_s[:] = c_s_hat
-            c_nr[:] = c_nr_hat
-            e_const_hats = [e + r for e, r in zip(es, r_hat.T)]
-            # c_s_prev = c_s.copy()
-            # c_nr_prev = c_nr.copy()
-            for m in range(self.n_alternations):
-                # Solve for similarity
-                for k, (e_const, gt_s) in enumerate(zip(e_const_hats, gt_s_vs)):
-                    c_tmp = np.zeros(n_params)
-                    c_nr_f = c_nr[:, k]
-                    c_tmp[4:] = c_nr_f
-                    # Build BsCs (current landmark estimate according to the
-                    # similarity)
-                    self.transform.from_vector_inplace(c_tmp)
-                    e_hat = e_const - self.j_nr.dot(c_nr_f)
-                    l_hat = gt_s - self.transform.sparse_target.points.ravel()
-                    e_s = np.hstack([self.data_weight * e_hat,
-                                     self.landmark_weight * l_hat])
-                    c_s[:, k] = np.linalg.solve(self.h_t_s,
-                                                self.j_t_s.T.dot(e_s))
-                # Solve for non-rigid
-                # new_es = []
-                for k, (e_const, gt_s) in enumerate(zip(e_const_hats, gt_s_vs)):
-                    c_tmp = np.zeros(n_params)
-                    c_s_f = c_s[:, k]
-                    c_tmp[:4] = c_s_f
-                    # Build BnrCnr (current landmark estimate according to the
-                    # non-rigid part)
-                    self.transform.from_vector_inplace(c_tmp)
-                    e_hat = e_const - self.j_s.dot(c_s_f)
-                    l_hat = gt_s - self.transform.sparse_target.points.ravel()
-                    e_nr = np.hstack([self.data_weight * e_hat,
-                                      self.landmark_weight * l_hat])
-                    # Solution for data term only (no lambda)
-                    if self.lmda == 0:
-                        c_nr[:, k] = np.linalg.solve(self.h_t_nr,
-                                                     self.j_t_nr.T.dot(e_nr))
-                    else:
-                        # solution for rank(C) < lambda
-                        c_nr[:, k] = self.pinv_t_nr.dot(
-                            self.U.dot(self.U.T.dot(e_nr)))
+            for _ in xrange(self.n_alternations):
+                es = []
+                jps = []
+                gt_ds = []
+                for im, ps, gt_s in zip(images, shape_parameters, gt_s_vs):
+                    self.transform.from_vector_inplace(ps)
+                    # warp the image
+                    i = self.interface.warp(im)
+                    # mask image
+                    masked_i = i.as_vector()[im_vec_mask]
 
-                # solution for lambda||C||_*
-                # if self.lmda > 0:
-                #     e_nr = np.vstack(new_es).T
-                #     projected_error = self.US.dot(e_nr)
-                #     U1, S1, V1 = np.linalg.svd(projected_error,
-                #                                full_matrices=False)
-                #     svp = sum(S1 > self.lmda)
-                #     thresh_S = np.diag(S1[:svp] - self.lmda)
-                #     recon_usv = U1[:, :svp].dot(thresh_S.dot(V1[:svp, :]))
-                #     c_nr[:] = self.V.T.dot(recon_usv)
+                    # compute error image
+                    es.append(self.vec_template - masked_i)
+                    if hasattr(self.transform, 'jp'):
+                        jps.append(self.transform.jp())
 
-                # print('Cs', m, np.linalg.norm(c_s - c_s_prev))
-                # print('C_nr', m, np.linalg.norm(c_nr - c_nr_prev))
-                # c_s_prev = c_s.copy()
-                # c_nr_prev = c_nr.copy()
+                    gt_ds.append(gt_s)
+                    #- self.transform.sparse_target.points.ravel())
+
+                # Alternate and solve for dp and low rank
+                # B
+                j_c = self.j.dot(c_hat)
+                e_tots = [np.hstack([e + cj,
+                                     self.landmark_weight * gt_d,
+                                     self.rank_weight * ctd])
+                          for e, gt_d, ctd, cj in zip(es, gt_ds,
+                                                      c_tilde.T, j_c.T)]
+                c = self.interface.seq_solve(self.h_t, self.j_t, e_tots, jps,
+                                             prior)
+
+                # soft impute to reduce the rank
+                if self.lamda > 0:
+                    u1, s1, v1 = np.linalg.svd(c[4:, :],
+                                               full_matrices=False)
+                    svp = sum(s1 > self.lamda)
+                    c_tilde[:] = u1[:, :svp].dot(np.diag(s1[:svp]).dot(v1[:svp]))
 
             # Copy current parameters
-            c_t = np.vstack([c_s, c_nr])
-            new_shape_parameters = [c for c in c_t.T]
+            new_shape_parameters = [ck for ck in c.T]
             seq_shape_parameters.append(new_shape_parameters)
             shape_parameters = new_shape_parameters
 
             # save cost (sum of squared errors)
             costs.append([e.T.dot(e) for e in es])
 
-            if np.linalg.norm(np.abs(c_hat - c_t)) < 1e10:
-                break
+            # if np.linalg.norm(np.abs(c_hat - c)) < 1e10:
+            #    break
 
         # return aam algorithm result
-        costs = [c for c in zip(*costs)]
+        costs = [ck for ck in zip(*costs)]
         seq_shape_parameters = [sp for sp in zip(*seq_shape_parameters)]
         algorithm_results = []
         for k, (im, s_params, cs) in enumerate(zip(images, seq_shape_parameters,
