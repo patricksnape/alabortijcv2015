@@ -313,6 +313,7 @@ class TIC(ATMAlgorithm):
     """
     def __init__(self, atm_interface, template, transform,
                  eps=10**-5, **kwargs):
+        self.early_termination = kwargs.pop('early_termination', False)
         # call super constructor
         super(TIC, self).__init__(
             atm_interface, template, transform, eps, **kwargs)
@@ -357,7 +358,7 @@ class TIC(ATMAlgorithm):
             # save cost
             cost.append(e.T.dot(e))
 
-            if np.linalg.norm(dp) < 1e6:
+            if self.early_termination and np.linalg.norm(dp) < 1e6:
                 break
 
         # return aam algorithm result
@@ -458,6 +459,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         self.data_weight = np.sqrt(kwargs.pop('data_weight', 1.0))
         self.n_alternations = kwargs.pop('n_alternations', 3)
         self.lamda = kwargs.pop('lamda', [0]).pop(0)
+        self.early_termination = kwargs.pop('early_termination', False)
 
         # call super constructor
         super(ConstrainedSequenceTIC, self).__init__(
@@ -600,7 +602,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
             # save cost (sum of squared errors)
             costs.append([e.T.dot(e) for e in es])
 
-            if np.linalg.norm(np.abs(c_hat - c_t)) < 1e10:
+            if self.early_termination and np.linalg.norm(np.abs(c_hat - c_t)) < 1e10:
                 break
 
         # return aam algorithm result
