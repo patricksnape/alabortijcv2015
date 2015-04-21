@@ -457,7 +457,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         self.landmark_weight = np.sqrt(kwargs.pop('landmark_weight', 1.0))
         self.data_weight = np.sqrt(kwargs.pop('data_weight', 1.0))
         self.n_alternations = kwargs.pop('n_alternations', 3)
-        self.lmda = kwargs.pop('lmda', [0]).pop(0)
+        self.lamda = kwargs.pop('lamda', [0]).pop(0)
 
         # call super constructor
         super(ConstrainedSequenceTIC, self).__init__(
@@ -488,9 +488,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         self.h_t_nr = self.j_t_nr.T.dot(self.j_t_nr)
         self.pinv_t_nr = np.linalg.pinv(self.j_t_nr)
         self.U, self.S, self.V = np.linalg.svd(self.j_t_nr, full_matrices=False)
-        self.U = self.U[:, :self.lmda]
-        # for ||C||_*
-        #self.US = np.linalg.inv(np.diag(self.S)).dot(self.U.T)
+        self.US = np.linalg.inv(np.diag(self.S)).dot(self.U.T)
 
     def run(self, images, initial_shapes, gt_shapes=None, max_iters=20,
             prior=False):
@@ -556,7 +554,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                     c_s[:, k] = np.linalg.solve(self.h_t_s,
                                                 self.j_t_s.T.dot(e_s))
                 # Solve for non-rigid
-                # new_es = []
+                new_es = []
                 for k, (e_const, gt_s) in enumerate(zip(e_const_hats, gt_s_vs)):
                     c_tmp = np.zeros(n_params)
                     c_s_f = c_s[:, k]
@@ -569,24 +567,24 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                     e_nr = np.hstack([self.data_weight * e_hat,
                                       self.landmark_weight * l_hat])
                     # Solution for data term only (no lambda)
-                    if self.lmda == 0:
+                    if self.lamda == 0:
                         c_nr[:, k] = np.linalg.solve(self.h_t_nr,
                                                      self.j_t_nr.T.dot(e_nr))
                     else:
-                        # solution for rank(C) < lambda
-                        c_nr[:, k] = self.pinv_t_nr.dot(
-                            self.U.dot(self.U.T.dot(e_nr)))
+                        new_es.append(e_nr)
 
-                # solution for lambda||C||_*
-                # if self.lmda > 0:
-                #     e_nr = np.vstack(new_es).T
-                #     projected_error = self.US.dot(e_nr)
-                #     U1, S1, V1 = np.linalg.svd(projected_error,
-                #                                full_matrices=False)
-                #     svp = sum(S1 > self.lmda)
-                #     thresh_S = np.diag(S1[:svp] - self.lmda)
-                #     recon_usv = U1[:, :svp].dot(thresh_S.dot(V1[:svp, :]))
-                #     c_nr[:] = self.V.T.dot(recon_usv)
+                if self.lamda > 0:
+                    e_nr = np.vstack(new_es).T
+                    projected_error = self.US.dot(e_nr)
+                    U1, S1, V1 = np.linalg.svd(projected_error,
+                                               full_matrices=False)
+                    svp = self.lamda
+                    recon_usv = U1[:, :svp].dot(np.diag(S1[:svp]).dot(V1[:svp, :]))
+                    # solution for lambda||C||_*
+                    # svp = sum(S1 > self.lmda)
+                    # thresh_S = np.diag(S1[:svp] - self.lmda)
+                    # recon_usv = U1[:, :svp].dot(thresh_S.dot(V1[:svp, :]))
+                    c_nr[:] = self.V.T.dot(recon_usv)
 
                 # print('Cs', m, np.linalg.norm(c_s - c_s_prev))
                 # print('C_nr', m, np.linalg.norm(c_nr - c_nr_prev))
