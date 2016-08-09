@@ -49,7 +49,7 @@ class StandardATMInterface(ATMInterface):
 
         if sampling_step is None:
             sampling_step = 1
-        sampling_pattern = xrange(0, n_true_pixels, sampling_step)
+        sampling_pattern = range(0, n_true_pixels, sampling_step)
         sampling_mask[sampling_pattern] = 1
 
         self.image_vec_mask = np.nonzero(np.tile(
@@ -69,7 +69,8 @@ class StandardATMInterface(ATMInterface):
 
     def warp(self, image):
         return image.warp_to_mask(self.algorithm.template.mask,
-                                  self.algorithm.transform)
+                                  self.algorithm.transform,
+                                  warp_landmarks=False)
 
     def gradient(self, image):
         g = fast_gradient(image)
@@ -276,7 +277,7 @@ class ConstrainedTIC(ATMAlgorithm):
 
         gt_s_v = gt_shape.as_vector()
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -295,7 +296,7 @@ class ConstrainedTIC(ATMAlgorithm):
             dp = self.interface.solve(self.h_nr, self.j_nr, e_tot, prior)
 
             # update transform
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # save cost
@@ -339,7 +340,7 @@ class TIC(ATMAlgorithm):
         self.transform.set_target(initial_shape)
         shape_parameters = [self.transform.as_vector()]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
             # warp image
             i = self.interface.warp(image)
             # mask image
@@ -352,13 +353,13 @@ class TIC(ATMAlgorithm):
             dp = self.interface.solve(self.h, self.j, e, prior)
 
             # update transform
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # save cost
             cost.append(e.T.dot(e))
 
-            if self.early_termination and np.linalg.norm(dp) < 1e6:
+            if np.linalg.norm(dp) < 1e6:
                 break
 
         # return aam algorithm result
@@ -402,11 +403,11 @@ class SequenceTIC(ATMAlgorithm):
         seq_shape_parameters = [shape_parameters]
         im_vec_mask = self.interface.image_vec_mask
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
             es = []
             jps = []
             for im, ps in zip(images, shape_parameters):
-                self.transform.from_vector_inplace(ps)
+                self.transform._from_vector_inplace(ps)
                 # warp the image
                 i = self.interface.warp(im)
                 # mask image
@@ -435,7 +436,7 @@ class SequenceTIC(ATMAlgorithm):
 
         # return aam algorithm result
         costs = [c for c in zip(*costs)]
-        seq_shape_parameters = [sp for sp in zip(*seq_shape_parameters)]
+        seq_shape_parameters = list(zip(*seq_shape_parameters))
         algorithm_results = []
         for k, (im, s_params, cs) in enumerate(zip(images, seq_shape_parameters,
                                                    costs)):
@@ -514,11 +515,11 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
         c_s = np.zeros([4, n_frames])
         c_nr = np.zeros([n_nr_params, n_frames])
 
-        for it in xrange(max_iters):
+        for it in range(max_iters):
             es = []
             jps = []
             for im, ps, gt_s in zip(images, shape_parameters, gt_s_vs):
-                self.transform.from_vector_inplace(ps)
+                self.transform._from_vector_inplace(ps)
                 # warp the image
                 i = self.interface.warp(im)
                 # mask image
@@ -548,7 +549,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                     c_tmp[4:] = c_nr_f
                     # Build BsCs (current landmark estimate according to the
                     # similarity)
-                    self.transform.from_vector_inplace(c_tmp)
+                    self.transform._from_vector_inplace(c_tmp)
                     e_hat = e_const - self.j_nr.dot(c_nr_f)
                     l_hat = gt_s - self.transform.sparse_target.points.ravel()
                     e_s = np.hstack([self.data_weight * e_hat,
@@ -563,7 +564,7 @@ class ConstrainedSequenceTIC(ATMAlgorithm):
                     c_tmp[:4] = c_s_f
                     # Build BnrCnr (current landmark estimate according to the
                     # non-rigid part)
-                    self.transform.from_vector_inplace(c_tmp)
+                    self.transform._from_vector_inplace(c_tmp)
                     e_hat = e_const - self.j_s.dot(c_s_f)
                     l_hat = gt_s - self.transform.sparse_target.points.ravel()
                     e_nr = np.hstack([self.data_weight * e_hat,

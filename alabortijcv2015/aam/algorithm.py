@@ -56,7 +56,7 @@ class StandardAAMInterface(AAMInterface):
 
         if sampling_step is None:
             sampling_step = 1
-        sampling_pattern = xrange(0, n_true_pixels, sampling_step)
+        sampling_pattern = range(0, n_true_pixels, sampling_step)
         sampling_mask[sampling_pattern] = 1
 
         self.image_vec_mask = np.nonzero(np.tile(
@@ -78,7 +78,8 @@ class StandardAAMInterface(AAMInterface):
 
     def warp(self, image):
         return image.warp_to_mask(self.algorithm.template.mask,
-                                  self.algorithm.transform)
+                                  self.algorithm.transform,
+                                  warp_landmarks=False)
 
     def gradient(self, image):
         g = fast_gradient(image)
@@ -419,7 +420,7 @@ class PIC(ProjectOut):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -435,7 +436,7 @@ class PIC(ProjectOut):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -492,7 +493,7 @@ class PICN(ProjectOut):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -513,7 +514,7 @@ class PICN(ProjectOut):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -552,7 +553,7 @@ class PFC(ProjectOut):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -579,7 +580,7 @@ class PFC(ProjectOut):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -618,7 +619,7 @@ class PFCN(ProjectOut):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -652,7 +653,7 @@ class PFCN(ProjectOut):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -694,7 +695,7 @@ class PSC(ProjectOut):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -722,8 +723,8 @@ class PSC(ProjectOut):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(a * dp)
-            dt.from_vector_inplace(dt.as_vector() + (1-a) * dp)
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + (1-a) * dp)
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -767,7 +768,7 @@ class PBC(ProjectOut):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -798,8 +799,8 @@ class PBC(ProjectOut):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(dp[:n_shape_params])
-            dt.from_vector_inplace(dt.as_vector() + dp[n_shape_params:])
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + dp[n_shape_params:])
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -844,7 +845,7 @@ class SIC(Simultaneous):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters+1):
+        for _ in range(max_iters+1):
 
             # warp image
             i = self.interface.warp(image)
@@ -865,7 +866,7 @@ class SIC(Simultaneous):
 
             # reconstruct appearance
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -902,7 +903,7 @@ class SIC(Simultaneous):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -930,7 +931,7 @@ class SICN(Simultaneous):
         self._j_U = np.zeros((self.appearance_model.n_active_components,
                               n_pixels, self.transform.n_parameters))
         for k, u in enumerate(self._U.T):
-            self.template2.from_vector_inplace(u)
+            self.template2._from_vector_inplace(u)
             nabla_u = self.interface.gradient(self.template2)
             j_u = self.interface.steepest_descent_images(nabla_u, self._dw_dp)
             self._j_U[k, ...] = j_u
@@ -953,7 +954,7 @@ class SICN(Simultaneous):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -974,7 +975,7 @@ class SICN(Simultaneous):
 
             # reconstruct appearance
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1010,7 +1011,7 @@ class SICN(Simultaneous):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -1053,7 +1054,7 @@ class SFC(Simultaneous):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -1072,7 +1073,7 @@ class SFC(Simultaneous):
 
             # reconstruct appearance
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1094,7 +1095,7 @@ class SFC(Simultaneous):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -1148,7 +1149,7 @@ class SFCN(Simultaneous):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -1169,7 +1170,7 @@ class SFCN(Simultaneous):
 
             # reconstruct appearance
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1205,7 +1206,7 @@ class SFCN(Simultaneous):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -1245,7 +1246,7 @@ class SSC(Simultaneous):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -1264,7 +1265,7 @@ class SSC(Simultaneous):
 
             # reconstruct appearance
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1288,8 +1289,8 @@ class SSC(Simultaneous):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(a * dp)
-            dt.from_vector_inplace(dt.as_vector() + (1-a) * dp)
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + (1-a) * dp)
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -1331,7 +1332,7 @@ class SBC(Simultaneous):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -1350,7 +1351,7 @@ class SBC(Simultaneous):
 
             # reconstruct appearance
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1377,8 +1378,8 @@ class SBC(Simultaneous):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(dp[n_shape_params:])
-            dt.from_vector_inplace(dt.as_vector() + dp[:n_shape_params])
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + dp[:n_shape_params])
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -1425,7 +1426,7 @@ class AIC(Alternating):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -1435,7 +1436,7 @@ class AIC(Alternating):
             # reconstruct appearance
             c = self._pinv_U.T.dot(masked_i - masked_m)
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1456,7 +1457,7 @@ class AIC(Alternating):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -1499,7 +1500,7 @@ class AICN(Alternating):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -1508,7 +1509,7 @@ class AICN(Alternating):
             i = i.as_vector()[self.interface.image_vec_mask]
             c = self._pinv_U.T.dot(i - masked_m)
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1534,7 +1535,7 @@ class AICN(Alternating):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -1577,7 +1578,7 @@ class AFC(Alternating):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # warp image
             i = self.interface.warp(image)
@@ -1586,7 +1587,7 @@ class AFC(Alternating):
             masked_i = i.as_vector()[self.interface.image_vec_mask]
             c = self._pinv_U.T.dot(masked_i - masked_m)
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1608,7 +1609,7 @@ class AFC(Alternating):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(dp)
-            self.transform.from_vector_inplace(
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -1652,7 +1653,7 @@ class AFCN(Alternating):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -1661,7 +1662,7 @@ class AFCN(Alternating):
             masked_i = i.as_vector()[self.interface.image_vec_mask]
             c = self._pinv_U.T.dot(masked_i - masked_m)
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1688,7 +1689,7 @@ class AFCN(Alternating):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -1731,7 +1732,7 @@ class ASC(Alternating):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -1740,7 +1741,7 @@ class ASC(Alternating):
             masked_i = i.as_vector()[self.interface.image_vec_mask]
             c = self._pinv_U.T.dot(masked_i - masked_m)
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1763,8 +1764,8 @@ class ASC(Alternating):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(a * dp)
-            dt.from_vector_inplace(dt.as_vector() + (1-a) * dp)
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + (1-a) * dp)
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -1809,7 +1810,7 @@ class ABC(Alternating):
         # masked model mean
         masked_m = m[self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -1818,7 +1819,7 @@ class ABC(Alternating):
             masked_i = i.as_vector()[self.interface.image_vec_mask]
             c = self._pinv_U.T.dot(masked_i - masked_m)
             t = self._U.dot(c) + m
-            self.template.from_vector_inplace(t)
+            self.template._from_vector_inplace(t)
             appearance_parameters.append(c)
 
             # compute error image
@@ -1844,8 +1845,8 @@ class ABC(Alternating):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(dp[:n_shape_params])
-            dt.from_vector_inplace(dt.as_vector() + dp[n_shape_params:])
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + dp[n_shape_params:])
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -1900,7 +1901,7 @@ class BIC(Bayesian):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -1916,7 +1917,7 @@ class BIC(Bayesian):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -1973,7 +1974,7 @@ class BICN(Bayesian):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -1994,7 +1995,7 @@ class BICN(Bayesian):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -2033,7 +2034,7 @@ class BFC(Bayesian):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -2060,7 +2061,7 @@ class BFC(Bayesian):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -2099,7 +2100,7 @@ class BFCN(Bayesian):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -2133,7 +2134,7 @@ class BFCN(Bayesian):
 
             # update transform
             target = self.transform.target
-            self.transform.from_vector_inplace(self.transform.as_vector() + dp)
+            self.transform._from_vector_inplace(self.transform.as_vector() + dp)
             shape_parameters.append(self.transform.as_vector())
 
             # test convergence
@@ -2175,7 +2176,7 @@ class BSC(Bayesian):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -2203,8 +2204,8 @@ class BSC(Bayesian):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(a * dp)
-            dt.from_vector_inplace(dt.as_vector() + (1-a) * dp)
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + (1-a) * dp)
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 
@@ -2248,7 +2249,7 @@ class BBC(Bayesian):
         masked_m = self.appearance_model.mean().as_vector()[
             self.interface.image_vec_mask]
 
-        for _ in xrange(max_iters):
+        for _ in range(max_iters):
 
             # compute warped image with current weights
             i = self.interface.warp(image)
@@ -2279,8 +2280,8 @@ class BBC(Bayesian):
             # update transform
             target = self.transform.target
             dt = self.transform.from_vector(dp[:n_shape_params])
-            dt.from_vector_inplace(dt.as_vector() + dp[n_shape_params:])
-            self.transform.from_vector_inplace(
+            dt._from_vector_inplace(dt.as_vector() + dp[n_shape_params:])
+            self.transform._from_vector_inplace(
                 self.transform.as_vector() + dt.as_vector())
             shape_parameters.append(self.transform.as_vector())
 

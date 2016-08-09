@@ -9,7 +9,7 @@ from .algorithm import (StandardAAMInterface, LinearAAMInterface,
 from menpo.transform import (AlignmentSimilarity, Scale, UniformScale,
                              ThinPlateSplines)
 from menpo.shape import PointCloud
-from menpofit.base import noisy_align
+from alabortijcv2015.snape_iccv_2015 import noisy_align
 from .result import AAMFitterResult, LinearAAMFitterResult
 
 
@@ -109,13 +109,14 @@ class LinearAAMFitter(AAMFitter):
         # Warp the image up to interpolate
         current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
             self.dm.reference_frames[level + 1].mask,
-            UniformScale(scale / self.scales[level + 1], shape.n_dims))
+            UniformScale(scale / self.scales[level + 1], shape.n_dims),
+            warp_landmarks=False)
         # Back to pointcloud.
         new_shape = PointCloud(current_shape_im.as_vector(
             keep_channels=True).T)
         # But the values haven't changed! So we scale them as well.
         Scale(self.scales[level + 1] / scale,
-              n_dims=new_shape.n_dims).apply_inplace(new_shape)
+              n_dims=new_shape.n_dims)._apply_inplace(new_shape)
         return new_shape
 
     @property

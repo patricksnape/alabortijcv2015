@@ -5,8 +5,8 @@ import numpy as np
 
 from menpo.transform import Scale, AlignmentAffine
 
-from menpofit.base import noisy_align
-from menpofit.fitter import align_shape_with_bb
+from .snape_iccv_2015 import noisy_align
+from .snape_iccv_2015 import align_shape_with_bb
 
 from .utils import fsmooth
 
@@ -258,8 +258,8 @@ class Fitter(object):
 
         # rescale image wrt the scale factor between reference_shape and
         # initial_shape
-        image = image.rescale_to_reference_shape(self.reference_shape,
-                                                 group='initial_shape')
+        image = image.rescale_to_pointcloud(self.reference_shape,
+                                            group='initial_shape')
         if self.sigma:
             image.pixels = fsmooth(image.pixels, self.sigma)
 
@@ -342,7 +342,7 @@ class Fitter(object):
             shape = algorithm_result.final_shape
             if s != self.scales[-1]:
                 Scale(self.scales[j+1]/s,
-                      n_dims=shape.n_dims).apply_inplace(shape)
+                      n_dims=shape.n_dims)._apply_inplace(shape)
 
         return algorithm_results
 

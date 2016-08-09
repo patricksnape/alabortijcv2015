@@ -7,7 +7,7 @@ import numpy as np
 from menpo.shape import TriMesh
 from menpo.transform import Translation
 from menpo.image import MaskedImage
-from alabortijcv2015.atm.builder import zero_flow_grid_pcloud
+from alabortijcv2015.snape_iccv_2015 import zero_flow_grid_pcloud
 from alabortijcv2015.builder import build_reference_frame, \
     build_patch_reference_frame
 from menpo.transform.piecewiseaffine.base import CythonPWA
@@ -142,7 +142,7 @@ class GlobalAAM(AAM):
             reference_frame.landmarks['source'].lms, landmarks)
 
         instance = appearance_instance.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance
@@ -182,7 +182,7 @@ class PatchAAM(AAM):
             reference_frame.landmarks['source'].lms, landmarks)
 
         instance = appearance_instance.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance
@@ -223,7 +223,7 @@ class LinearGlobalAAM(AAM):
                               landmarks)
 
         instance = appearance_instance.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance

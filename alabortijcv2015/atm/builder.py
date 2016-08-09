@@ -1,21 +1,20 @@
 from __future__ import division
-import numpy as np
 from itertools import chain
 
-
-from scipy.spatial.kdtree import KDTree
 
 from menpo.transform import UniformScale, AlignmentSimilarity, PiecewiseAffine
 from menpo.visualize import print_dynamic
 from menpo.feature import no_op
-from menpo.shape import PointCloud, TriMesh
+from menpo.shape import PointCloud
 from menpo.image import MaskedImage
 from menpofit.transform import DifferentiablePiecewiseAffine
+from ..snape_iccv_2015 import (sparse_landmark_indices_from_dense,
+                               zero_flow_grid_pcloud, pointclouds_from_uv)
 
-from ..builder import \
-    compute_features, scale_images, \
-    build_shape_model, build_reference_frame, \
-    compute_reference_shape_from_shapes, scale_shape_diagonal
+from ..builder import (compute_features, scale_images,
+                       build_shape_model, build_reference_frame,
+                       compute_reference_shape_from_shapes,
+                       scale_shape_diagonal)
 
 # Abstract Interface for ATM Builders -----------------------------------------
 
@@ -61,8 +60,8 @@ class ATMBuilder(object):
 
     def _prepare_data(self, template, shapes, reference_shape, group=None,
                       label=None, verbose=False):
-        normalized_template = template.rescale_to_reference_shape(
-            reference_shape, group=group, label=label)
+        normalized_template = template.rescale_to_pointcloud(
+            reference_shape, group=group)
 
         # build models at each scale
         # for each pyramid level (high --> low)
@@ -134,7 +133,8 @@ class GlobalATMBuilder(ATMBuilder):
                                    template.landmarks[group][label])
 
         # warp template to reference frame
-        warped_template = template.warp_to_mask(ref_frame.mask, transform)
+        warped_template = template.warp_to_mask(ref_frame.mask, transform,
+                                                warp_landmarks=False)
         warped_template.landmarks['source'] = ref_frame.landmarks['source']
 
         return warped_template
@@ -295,7 +295,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
 
     def _prepare_data_sparse(self, template, uv_images, reference_shape,
                              group=None, verbose=False):
-        normalized_template = template.rescale_to_reference_shape(
+        normalized_template = template.rescale_to_pointcloud(
             reference_shape, group=group)
 
         # build models at each scale
@@ -329,7 +329,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
             # which is really annoying, so here I just make sure that the
             # template actually matches my shapes. So I have to re-sample
             # the bloody shapes.
-            level_uvs[0].constrain_mask_to_landmarks(group=group)
+            level_uvs[0] = level_uvs[0].constrain_mask_to_landmarks(group=group)
             for luv in level_uvs:
                 luv.mask = level_uvs[0].mask
 
@@ -350,13 +350,13 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
 
             # Make sure the scale of the pointclouds is correct to the new frame
             for ls in level_shapes:
-                AlignmentSimilarity(ls, zero_flow).apply_inplace(ls)
+                AlignmentSimilarity(ls, zero_flow)._apply_inplace(ls)
 
             yield level_template, level_shapes, level_ref_frame
 
     def _prepare_data(self, template, uv_images, reference_shape,
                       group=None, verbose=False):
-        normalized_template = template.rescale_to_reference_shape(
+        normalized_template = template.rescale_to_pointcloud(
             reference_shape, group=group)
 
         # build models at each scale
@@ -402,7 +402,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
 
             # Make sure the scale of the pointclouds is correct to the new frame
             for ls in level_shapes:
-                AlignmentSimilarity(ls, zero_flow).apply_inplace(ls)
+                AlignmentSimilarity(ls, zero_flow)._apply_inplace(ls)
 
             yield level_template, level_shapes, level_ref_frame
 
@@ -412,7 +412,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
         ref_frame = MaskedImage.init_blank(template_im.shape,
                                            mask=template_im.mask,
                                            n_channels=2)
-        ref_frame.from_vector_inplace(zero_flow.points.T.ravel())
+        ref_frame._from_vector_inplace(zero_flow.points.T.ravel())
         return ref_frame
 
     def _sample_template(self, template, ref_frame, verbose=True):
@@ -439,7 +439,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
         if isinstance(template, MaskedImage):
             template = template.as_unmasked()
         warped_template = template.warp_to_mask(ref_frame.mask,
-                                                transform)
+                                                transform, warp_landmarks=False)
         warped_template.landmarks['source'] = ref_frame.landmarks[group]
 
         return warped_template
@@ -455,72 +455,3 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
                                self.scale_features,
                                dense_indices=dense_indices,
                                sparse_masks=sparse_masks)
-
-
-def pointclouds_from_uv(u, v, add_zero=False):
-    if add_zero:
-        zero = zero_flow_grid_pcloud(u.shape).points
-
-    pclouds = []
-    for u1, v1 in zip(u.as_vector(keep_channels=True),
-                      v.as_vector(keep_channels=True)):
-        if add_zero:
-            u1 = u1 + zero[:, 1]
-            v1 = v1 + zero[:, 0]
-        pclouds.append(PointCloud(np.vstack([v1, u1]).T))
-    return pclouds
-
-
-def grid_triangulation(shape):
-    height, width = shape
-    row_to_index = lambda x: x * width
-    top_triangles = lambda x: np.concatenate([np.arange(row_to_index(x), row_to_index(x) + width - 1)[..., None],
-                                              np.arange(row_to_index(x) + 1, row_to_index(x) + width)[..., None],
-                                              np.arange(row_to_index(x + 1), row_to_index(x + 1) + width - 1)[..., None]], axis=1)
-
-    # Half edges are opposite directions
-    bottom_triangles = lambda x: np.concatenate([np.arange(row_to_index(x + 1), row_to_index(x + 1) + width - 1)[..., None],
-                                                 np.arange(row_to_index(x) + 1, row_to_index(x) + width)[..., None],
-                                                 np.arange(row_to_index(x + 1) + 1, row_to_index(x + 1) + width)[..., None]], axis=1)
-
-    trilist = []
-    for k in xrange(height - 1):
-        trilist.append(top_triangles(k))
-        trilist.append(bottom_triangles(k))
-
-    return np.concatenate(trilist)
-
-
-def zero_flow_grid_pcloud(shape, triangulated=False, mask=None):
-    point_grid = np.meshgrid(range(0, shape[0]),
-                             range(0, shape[1]), indexing='ij')
-    point_grid_vec = np.vstack([p.ravel() for p in point_grid]).T
-
-    if triangulated:
-        trilist = grid_triangulation(shape)
-        pcloud = TriMesh(point_grid_vec, trilist=trilist)
-    else:
-        pcloud = PointCloud(point_grid_vec)
-
-    if mask is not None:
-        return pcloud.from_mask(mask.pixels.ravel())
-    else:
-        return pcloud
-
-
-def sparse_landmark_indices_from_dense(dense_landmarks, sparse_lmarks):
-    points = dense_landmarks.points
-
-    tree = KDTree(points)
-
-    indices = np.array([tree.query(p)[1] for p in sparse_lmarks.points])
-    sparse_landmark_mask = np.zeros_like(indices, dtype=np.bool)
-    uniq_indices_set = set()
-    uniq_indices_list = []
-    for k, i in enumerate(indices):
-        if i not in uniq_indices_set:
-            uniq_indices_set.add(i)
-            uniq_indices_list.append(i)
-            sparse_landmark_mask[k] = True
-
-    return np.array(uniq_indices_list), sparse_landmark_mask

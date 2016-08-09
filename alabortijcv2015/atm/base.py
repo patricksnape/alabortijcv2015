@@ -1,7 +1,7 @@
 from __future__ import division
 import numpy as np
 
-from alabortijcv2015.atm.builder import zero_flow_grid_pcloud
+from alabortijcv2015.snape_iccv_2015 import zero_flow_grid_pcloud
 from alabortijcv2015.builder import build_reference_frame
 
 
@@ -102,7 +102,8 @@ class GlobalATM(ATM):
             reference_frame.landmarks['source'].lms, landmarks)
 
         instance = template.as_unmasked().warp_to_mask(reference_frame.mask,
-                                                       transform)
+                                                       transform,
+                                                       warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance
@@ -142,7 +143,7 @@ class LinearGlobalATM(ATM):
                               landmarks)
 
         instance = template.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance

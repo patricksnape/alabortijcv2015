@@ -134,7 +134,7 @@ class LinearAAMFitterResult(AAMFitterResult):
     def initial_dense_shape(self):
         initial_shape = self.algorithm_results[0].initial_dense_shape.copy()
         Scale(self.scales[-1]/self.scales[0],
-              initial_shape.n_dims).apply_inplace(initial_shape)
+              initial_shape.n_dims)._apply_inplace(initial_shape)
         return self._affine_correction.apply(initial_shape)
 
 

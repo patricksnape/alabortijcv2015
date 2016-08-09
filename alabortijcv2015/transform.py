@@ -126,12 +126,12 @@ class ModelDrivenTransform(Transform, Targetable, Vectorizable, DP):
         """
         return self.pdm.as_vector()
 
-    def from_vector_inplace(self, vector):
+    def _from_vector_inplace(self, vector):
         r"""
         Updates the ModelDrivenTransform's state from it's
         vectorized form.
         """
-        self.pdm.from_vector_inplace(vector)
+        self.pdm._from_vector_inplace(vector)
         # By here the pdm has updated our target state, we just need to
         # update the transform
         self.transform.set_target(self.target)
