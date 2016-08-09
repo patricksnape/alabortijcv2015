@@ -102,7 +102,8 @@ class GlobalATM(ATM):
             reference_frame.landmarks['source'].lms, landmarks)
 
         instance = template.as_unmasked().warp_to_mask(reference_frame.mask,
-                                                       transform)
+                                                       transform,
+                                                       warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance
@@ -142,7 +143,7 @@ class LinearGlobalATM(ATM):
                               landmarks)
 
         instance = template.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance

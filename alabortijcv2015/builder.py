@@ -60,8 +60,7 @@ def normalize_images(images, group, label, ref_shape, verbose=True, sigma=None):
         if verbose:
             print_dynamic('- Normalizing images size: {}'.format(
                 progress_bar_str((c + 1.) / len(images), show_bar=False)))
-        i = i.rescale_to_reference_shape(ref_shape, group=group,
-                                         label=label)
+        i = i.rescale_to_pointcloud(ref_shape, group=group)
         if sigma:
             i.pixels = fsmooth(i.pixels, sigma)
         norm_images.append(i)

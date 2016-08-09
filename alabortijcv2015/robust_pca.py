@@ -46,7 +46,7 @@ def rpca_alm(X, lmbda=None, tol=1e-7, max_iters=1000, verbose=True,
     sv = 5
     n = Y.shape[0]
 
-    for iter1 in xrange(max_iters):
+    for iter1 in range(max_iters):
         primal_converged = False
         sv = sv + np.round(n * 0.1)
         primal_iter = 0
@@ -114,7 +114,7 @@ def rpca_alm_no_E(X, tol=1e-7, max_iters=1000, verbose=True,
     sv = 5
     n = Y.shape[0]
 
-    for iter1 in xrange(max_iters):
+    for iter1 in range(max_iters):
         primal_converged = False
         sv = sv + np.round(n * 0.1)
         primal_iter = 0

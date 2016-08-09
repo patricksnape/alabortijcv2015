@@ -14,6 +14,8 @@ class PDM(ModelInstance, DP):
     def __init__(self, model, sigma2=1):
         super(PDM, self).__init__(model)
         self._set_prior(sigma2)
+        # Default target is the mean
+        self._target = self.model.mean()
 
     def _set_prior(self, sigma2):
         self.j_prior = sigma2 / self.model.eigenvalues
@@ -146,13 +148,13 @@ class GlobalPDM(PDM):
         """
         return np.hstack([self.global_parameters, self.weights])
 
-    def from_vector_inplace(self, vector):
+    def _from_vector_inplace(self, vector):
         # First, update the global transform
         global_parameters = vector[:self.n_global_parameters]
         self._update_global_weights(global_parameters)
         # Now extract the weights, and let super handle the update
         weights = vector[self.n_global_parameters:]
-        PDM.from_vector_inplace(self, weights)
+        PDM._from_vector_inplace(self, weights)
 
     def _update_global_weights(self, global_weights):
         r"""
@@ -160,7 +162,7 @@ class GlobalPDM(PDM):
         set. Default implementation simply asks global_transform to
         update itself from vector.
         """
-        self.global_transform.from_vector_inplace(global_weights)
+        self.global_transform._from_vector_inplace(global_weights)
 
     def d_dp(self, points):
         # d_dp is always evaluated at the mean shape

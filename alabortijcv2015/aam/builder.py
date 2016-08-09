@@ -269,7 +269,8 @@ class GlobalAAMBuilder(AAMBuilder):
             # compute transforms
             t.set_target(s)
             # warp images
-            warped_i = i.warp_to_mask(ref_frame.mask, t)
+            warped_i = i.warp_to_mask(ref_frame.mask, t,
+                                      warp_landmarks=False)
             # attach reference frame landmarks to images
             warped_i.landmarks['source'] = ref_frame.landmarks['source']
             warped_images.append(warped_i)
@@ -320,7 +321,8 @@ class PatchAAMBuilder(AAMBuilder):
             # compute transforms
             t.set_target(s)
             # warp images
-            warped_i = i.warp_to_mask(ref_frame.mask, t)
+            warped_i = i.warp_to_mask(ref_frame.mask, t,
+                                      warp_landmarks=False)
             # attach reference frame landmarks to images
             warped_i.landmarks['source'] = ref_frame.landmarks['source']
             warped_images.append(warped_i)
@@ -384,7 +386,8 @@ class LinearGlobalAAMBuilder(GlobalAAMBuilder):
             # compute transforms
             t.set_target(i.landmarks[None].lms)
             # warp images
-            warped_i = i.warp_to_mask(ref_frame.mask, t)
+            warped_i = i.warp_to_mask(ref_frame.mask, t,
+                                      warp_landmarks=False)
             # attach reference frame landmarks to images
             warped_i.landmarks['source'] = scaled_source
             warped_images.append(warped_i)
@@ -459,7 +462,8 @@ class LinearPatchAAMBuilder(PatchAAMBuilder):
             t = self.transform(PointCloud(self.reference_frame.landmarks[
                 'source'].lms.points[:self.n_landmarks]), s)
             # warp images
-            warped_i = i.warp_to_mask(self.reference_frame.mask, t)
+            warped_i = i.warp_to_mask(self.reference_frame.mask, t,
+                                      warp_landmarks=False)
             # attach reference frame landmarks to images
             warped_i.landmarks['source'] = \
                 self.reference_frame.landmarks['source']

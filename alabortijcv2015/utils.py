@@ -1,16 +1,19 @@
 from __future__ import division
-import cPickle
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
 from skimage.filters import gaussian_filter
 
 
 def pickle_load(path):
     with open(str(path), 'rb') as f:
-        return cPickle.load(f)
+        return pickle.load(f)
 
 
 def pickle_dump(obj, path):
     with open(str(path), 'wb') as f:
-        cPickle.dump(obj, f, protocol=2)
+        pickle.dump(obj, f, protocol=2)
 
 
 def flatten_out(list_of_lists):

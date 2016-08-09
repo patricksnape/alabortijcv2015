@@ -142,7 +142,7 @@ class GlobalAAM(AAM):
             reference_frame.landmarks['source'].lms, landmarks)
 
         instance = appearance_instance.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance
@@ -182,7 +182,7 @@ class PatchAAM(AAM):
             reference_frame.landmarks['source'].lms, landmarks)
 
         instance = appearance_instance.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance
@@ -223,7 +223,7 @@ class LinearGlobalAAM(AAM):
                               landmarks)
 
         instance = appearance_instance.as_unmasked().warp_to_mask(
-            reference_frame.mask, transform)
+            reference_frame.mask, transform, warp_landmarks=False)
         instance.landmarks = reference_frame.landmarks
 
         return instance

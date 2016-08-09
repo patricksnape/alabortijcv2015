@@ -13,7 +13,7 @@ from menpo.transform import (Scale, AlignmentAffine, UniformScale,
 from menpo.visualize import print_dynamic
 from menpo.shape import PointCloud
 from menpo.image import BooleanImage
-from menpofit.base import noisy_align
+from alabortijcv2015.snape_iccv_2015 import noisy_align
 from .result import ATMFitterResult, LinearATMFitterResult
 
 
@@ -43,7 +43,7 @@ class ATMFitter(Fitter):
                 prepared_objs[k] = (o[0], o[1], [])
 
         seq_images, seq_initial_shapes, seq_gt_shapes = [
-            zip(*obj) for obj in zip(*prepared_objs)]
+            list(zip(*obj)) for obj in zip(*prepared_objs)]
 
         # work out the affine transform between the initial shape of the
         # highest pyramidal level and the initial shape of the original image
@@ -97,7 +97,7 @@ class ATMFitter(Fitter):
                 for a in algorithm_results:
                     sh = a.final_shape
                     Scale(self.scales[j + 1] / s,
-                          n_dims=sh.n_dims).apply_inplace(sh)
+                          n_dims=sh.n_dims)._apply_inplace(sh)
                     shapes.append(sh)
             print_dynamic('Finished Scale {}'.format(j))
 
@@ -195,13 +195,14 @@ class LinearATMFitter(ATMFitter):
         # Warp the image up to interpolate
         current_shape_im = current_shape_im.as_unmasked().warp_to_mask(
             self.dm.reference_frames[level + 1].mask,
-            UniformScale(scale / self.scales[level + 1], 2))
+            UniformScale(scale / self.scales[level + 1], 2),
+            warp_landmarks=False)
         # Back to pointcloud.
         shape = PointCloud(current_shape_im.as_vector(
             keep_channels=True).T)
         # But the values haven't changed! So we scale them as well.
         Scale(self.scales[level + 1] / scale,
-              n_dims=shape.n_dims).apply_inplace(shape)
+              n_dims=shape.n_dims)._apply_inplace(shape)
         return shape
 
     @property
@@ -294,7 +295,7 @@ class LinearATMFitter(ATMFitter):
                     shapes.append(sh)
             print_dynamic('Finished Scale {}'.format(j))
 
-        return [r for r in zip(*seq_algorithm_results)]
+        return list(zip(*seq_algorithm_results))
 
     def _prepare_image(self, image, initial_shape, gt_shape=None,
                        crop_image=None):
@@ -320,8 +321,8 @@ class LinearATMFitter(ATMFitter):
             self.scales[-1] / self.scales[0],
             n_dims=initial_shape.n_dims).apply(self.dm.reference_shapes()[0])
 
-        image = image.rescale_to_reference_shape(scaled_lowest_reference,
-                                                 group='initial_shape')
+        image = image.rescale_to_pointcloud(scaled_lowest_reference,
+                                            group='initial_shape')
         if self.sigma:
             image.pixels = fsmooth(image.pixels, self.sigma)
 

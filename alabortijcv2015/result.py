@@ -1,27 +1,18 @@
 from __future__ import division
-import abc
-import menpo.io as mio
-
-from menpo.transform import Scale
-
-from menpofit.fittingresult import compute_error
 
 from menpo.image import Image
+from menpo.transform import Scale
+from menpofit.error import euclidean_error
 
 
 # Abstract Interface for Results ----------------------------------------------
 
 class Result(object):
-
-    __metaclass__ = abc.ABCMeta
-
-    @abc.abstractproperty
     def n_iters(self):
         r"""
         Returns the number of iterations.
         """
 
-    @abc.abstractmethod
     def shapes(self, as_points=False):
         r"""
         Generates a list containing the shapes obtained at each fitting
@@ -41,7 +32,6 @@ class Result(object):
             A list containing the shapes obtained at each fitting iteration.
         """
 
-    @abc.abstractmethod
     def gt_shapes(self, as_points=False):
         r"""
         Generates a list containing the shapes obtained at each fitting
@@ -61,31 +51,26 @@ class Result(object):
             A list containing the shapes obtained at each fitting iteration.
         """
 
-    @abc.abstractproperty
     def final_shape(self):
         r"""
         Returns the final fitted shape.
         """
 
-    @abc.abstractproperty
     def initial_shape(self):
         r"""
         Returns the initial shape from which the fitting started.
         """
 
-    @abc.abstractproperty
     def final_gt_shape(self):
         r"""
         Returns the final fitted shape.
         """
 
-    @abc.abstractproperty
     def initial_gt_shape(self):
         r"""
         Returns the initial shape from which the fitting started.
         """
 
-    @abc.abstractproperty
     def gt_shape(self):
         r"""
         Returns the original ground truth shape associated to the image.
@@ -126,10 +111,10 @@ class Result(object):
         """
         image = Image(self.image.pixels)
         for j, s in enumerate(self.shapes()):
-            image.landmarks['iter_'+str(j)] = s
+            image.landmarks['iter_' + str(j)] = s
         return image
 
-    def errors(self, error_type='me_norm'):
+    def errors(self, error_func=euclidean_error):
         r"""
         Returns a list containing the error at each fitting iteration.
 
@@ -145,13 +130,13 @@ class Result(object):
             The errors at each iteration of the fitting process.
         """
         if self.gt_shape is not None:
-            return [compute_error(s, gt, error_type)
+            return [error_func(s, gt)
                     for s, gt in zip(self.shapes(), self.gt_shapes())]
         else:
             raise ValueError('Ground truth has not been set, errors cannot '
                              'be computed')
 
-    def final_error(self, error_type='me_norm'):
+    def final_error(self, error_func=euclidean_error):
         r"""
         Returns the final fitting error.
 
@@ -167,13 +152,12 @@ class Result(object):
             The final error at the end of the fitting procedure.
         """
         if self.gt_shape is not None:
-            return compute_error(self.final_shape, self.final_gt_shape,
-                                 error_type)
+            return error_func(self.final_shape, self.final_gt_shape)
         else:
             raise ValueError('Ground truth has not been set, final error '
                              'cannot be computed')
 
-    def initial_error(self, error_type='me_norm'):
+    def initial_error(self, error_func=euclidean_error):
         r"""
         Returns the initial fitting error.
 
@@ -189,8 +173,7 @@ class Result(object):
             The initial error at the start of the fitting procedure.
         """
         if self.gt_shape is not None:
-            return compute_error(self.initial_shape, self.initial_gt_shape,
-                                 error_type)
+            return error_func(self.initial_shape, self.initial_gt_shape)
         else:
             raise ValueError('Ground truth has not been set, final error '
                              'cannot be computed')
@@ -204,7 +187,6 @@ class Result(object):
 # Abstract Interfaces for Algorithm Results -----------------------------------
 
 class AlgorithmResult(Result):
-
     @property
     def gt_shape(self):
         return self._gt_shape
@@ -257,7 +239,6 @@ class AlgorithmResult(Result):
 # Abstract Interface for Fitter Results ---------------------------------------
 
 class FitterResult(Result):
-
     def __init__(self, image, fitter, algorithm_results, affine_correction,
                  gt_shape=None):
         super(FitterResult, self).__init__()
@@ -302,7 +283,7 @@ class FitterResult(Result):
     def initial_gt_shape(self):
         gt_shape = self.algorithm_results[0].gt_shape.copy()
         Scale(self.scales[-1] / self.scales[0],
-              gt_shape.n_dims).apply_inplace(gt_shape)
+              gt_shape.n_dims)._apply_inplace(gt_shape)
         return self._affine_correction.apply(gt_shape)
 
     @property
@@ -357,7 +338,7 @@ class FitterResult(Result):
         """
         shapes = []
         for j, (alg, s) in enumerate(zip(self.algorithm_results, self.scales)):
-            transform = Scale(self.scales[-1]/s, alg.final_shape.n_dims)
+            transform = Scale(self.scales[-1] / s, alg.final_shape.n_dims)
             for t in alg.shapes(as_points=as_points):
                 t = transform.apply(t)
                 shapes.append(self._affine_correction.apply(t))
@@ -377,15 +358,14 @@ class FitterResult(Result):
     @property
     def initial_shape(self):
         initial_shape = self.algorithm_results[0].initial_shape.copy()
-        Scale(self.scales[-1]/self.scales[0],
-              initial_shape.n_dims).apply_inplace(initial_shape)
+        Scale(self.scales[-1] / self.scales[0],
+              initial_shape.n_dims)._apply_inplace(initial_shape)
         return self._affine_correction.apply(initial_shape)
 
 
 # Serializable Result --------------------------------------------------------
 
 class SerializableResult(Result):
-
     def __init__(self, image, shapes, n_iters, algorithm, gt_shapes=None):
         self._image = image
         self._shapes = shapes
@@ -437,4 +417,3 @@ class SerializableResult(Result):
     @property
     def image(self):
         return self._image
-

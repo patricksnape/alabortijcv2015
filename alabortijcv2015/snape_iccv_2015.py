@@ -3,8 +3,7 @@ from menpo.visualize import print_dynamic, progress_bar_str
 from menpo.feature import no_op
 from menpo.image import MaskedImage
 from menpo.shape import PointCloud, TriMesh
-from menpo.feature.base import winitfeature
-from cyvlfeat.sift.dsift import dsift as cyvlfeat_dsift
+from menpo.feature import fast_dsift
 import numpy as np
 from scipy.spatial import KDTree
 
@@ -36,7 +35,7 @@ def grid_triangulation(shape):
                                                  np.arange(row_to_index(x + 1) + 1, row_to_index(x + 1) + width)[..., None]], axis=1)
 
     trilist = []
-    for k in xrange(height - 1):
+    for k in range(height - 1):
         trilist.append(top_triangles(k))
         trilist.append(bottom_triangles(k))
 
@@ -129,29 +128,13 @@ def noisy_align(source, target, noise_std=0.04, rotation=False):
     return Similarity.init_identity(source.n_dims).from_vector(parameters + noise)
 
 
-@winitfeature
-def dsift(pixels, step=1, size=6, bounds=None, norm=False,
-          fast=True, window_size=6, geometry=(1, 1, 8), float_descriptors=True):
-    centers, output = cyvlfeat_dsift(np.rot90(pixels[0, ..., ::-1]),
-                                     step=step, size=size, bounds=bounds,
-                                     window_size=window_size, norm=norm,
-                                     fast=fast,
-                                     float_descriptors=float_descriptors,
-                                     geometry=geometry)
-    shape = pixels.shape[1:] - 2 * centers[:2, 0]
-    return (np.require(output.reshape((-1, shape[0], shape[1])),
-                       dtype=np.double),
-            np.require(centers[:2, ...].T[..., ::-1].reshape(
-                (shape[0], shape[1], 2)), dtype=np.int))
-
-
 def build_atm(template_im, shape_models, reference_frames, scales, feature=no_op,
               sparse_group=None, scale_features=True, verbose=True):
     from alabortijcv2015.atm import LinearGlobalATM
-    from alabortijcv2015.aam.builder import normalize_images, scale_images, compute_features
+    from alabortijcv2015.aam.builder import scale_images, compute_features
 
     # Normalise with the LARGEST scale
-    normalized_template = template_im.rescale_to_reference_shape(
+    normalized_template = template_im.rescale_to_pointcloud(
         reference_frames[0].landmarks[sparse_group].lms,
         group=sparse_group)
 
@@ -185,7 +168,8 @@ def build_atm(template_im, shape_models, reference_frames, scales, feature=no_op
         if isinstance(level_template, MaskedImage):
             level_template = level_template.as_unmasked(copy=False)
         warped_template = level_template.warp_to_mask(ref_frame.mask,
-                                                      transform)
+                                                      transform,
+                                                      warp_landmarks=False)
         warped_template.landmarks['source'] = ref_frame.landmarks[sparse_group]
         templates.append(warped_template)
 
@@ -253,7 +237,8 @@ def build_sparse_aam(images, shape_models, reference_frames, scales, feature=no_
                 im = im.as_unmasked()
             transform.set_target(im.landmarks[sparse_group].lms)
             warped_im = im.warp_to_mask(ref_frame.mask,
-                                        transform)
+                                        transform,
+                                        warp_landmarks=False)
             warped_im.landmarks['source'] = ref_frame.landmarks[sparse_group]
             warped_images.append(warped_im)
             if verbose:
@@ -332,7 +317,8 @@ def build_aam(images, shape_models, reference_frames, scales, feature=no_op,
                 im = im.as_unmasked()
             transform.set_target(im.landmarks[sparse_group].lms)
             warped_im = im.warp_to_mask(ref_frame.mask,
-                                        transform)
+                                        transform,
+                                        warp_landmarks=False)
             warped_im.landmarks['source'] = ref_frame.landmarks[sparse_group]
             warped_images.append(warped_im)
             if verbose:

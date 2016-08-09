@@ -1,21 +1,20 @@
 from __future__ import division
-import numpy as np
 from itertools import chain
 
-
-from scipy.spatial.kdtree import KDTree
 
 from menpo.transform import UniformScale, AlignmentSimilarity, PiecewiseAffine
 from menpo.visualize import print_dynamic
 from menpo.feature import no_op
-from menpo.shape import PointCloud, TriMesh
+from menpo.shape import PointCloud
 from menpo.image import MaskedImage
 from menpofit.transform import DifferentiablePiecewiseAffine
+from ..snape_iccv_2015 import (sparse_landmark_indices_from_dense,
+                               zero_flow_grid_pcloud, pointclouds_from_uv)
 
-from ..builder import \
-    compute_features, scale_images, \
-    build_shape_model, build_reference_frame, \
-    compute_reference_shape_from_shapes, scale_shape_diagonal
+from ..builder import (compute_features, scale_images,
+                       build_shape_model, build_reference_frame,
+                       compute_reference_shape_from_shapes,
+                       scale_shape_diagonal)
 
 # Abstract Interface for ATM Builders -----------------------------------------
 
@@ -61,8 +60,8 @@ class ATMBuilder(object):
 
     def _prepare_data(self, template, shapes, reference_shape, group=None,
                       label=None, verbose=False):
-        normalized_template = template.rescale_to_reference_shape(
-            reference_shape, group=group, label=label)
+        normalized_template = template.rescale_to_pointcloud(
+            reference_shape, group=group)
 
         # build models at each scale
         # for each pyramid level (high --> low)
@@ -134,7 +133,8 @@ class GlobalATMBuilder(ATMBuilder):
                                    template.landmarks[group][label])
 
         # warp template to reference frame
-        warped_template = template.warp_to_mask(ref_frame.mask, transform)
+        warped_template = template.warp_to_mask(ref_frame.mask, transform,
+                                                warp_landmarks=False)
         warped_template.landmarks['source'] = ref_frame.landmarks['source']
 
         return warped_template
@@ -295,7 +295,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
 
     def _prepare_data_sparse(self, template, uv_images, reference_shape,
                              group=None, verbose=False):
-        normalized_template = template.rescale_to_reference_shape(
+        normalized_template = template.rescale_to_pointcloud(
             reference_shape, group=group)
 
         # build models at each scale
@@ -350,13 +350,13 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
 
             # Make sure the scale of the pointclouds is correct to the new frame
             for ls in level_shapes:
-                AlignmentSimilarity(ls, zero_flow).apply_inplace(ls)
+                AlignmentSimilarity(ls, zero_flow)._apply_inplace(ls)
 
             yield level_template, level_shapes, level_ref_frame
 
     def _prepare_data(self, template, uv_images, reference_shape,
                       group=None, verbose=False):
-        normalized_template = template.rescale_to_reference_shape(
+        normalized_template = template.rescale_to_pointcloud(
             reference_shape, group=group)
 
         # build models at each scale
@@ -402,7 +402,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
 
             # Make sure the scale of the pointclouds is correct to the new frame
             for ls in level_shapes:
-                AlignmentSimilarity(ls, zero_flow).apply_inplace(ls)
+                AlignmentSimilarity(ls, zero_flow)._apply_inplace(ls)
 
             yield level_template, level_shapes, level_ref_frame
 
@@ -412,7 +412,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
         ref_frame = MaskedImage.init_blank(template_im.shape,
                                            mask=template_im.mask,
                                            n_channels=2)
-        ref_frame.from_vector_inplace(zero_flow.points.T.ravel())
+        ref_frame._from_vector_inplace(zero_flow.points.T.ravel())
         return ref_frame
 
     def _sample_template(self, template, ref_frame, verbose=True):
@@ -439,7 +439,7 @@ class LinearGlobalATMBuilder(GlobalATMBuilder):
         if isinstance(template, MaskedImage):
             template = template.as_unmasked()
         warped_template = template.warp_to_mask(ref_frame.mask,
-                                                transform)
+                                                transform, warp_landmarks=False)
         warped_template.landmarks['source'] = ref_frame.landmarks[group]
 
         return warped_template
