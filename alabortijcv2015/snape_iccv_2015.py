@@ -1,16 +1,132 @@
-from alabortijcv2015.aam import LinearGlobalAAM, GlobalAAM
-from alabortijcv2015.atm import LinearGlobalATM
-from menpo.transform import PiecewiseAffine, ThinPlateSplines
+from menpo.transform import PiecewiseAffine, AlignmentSimilarity, Similarity
 from menpo.visualize import print_dynamic, progress_bar_str
 from menpo.feature import no_op
-from menpo.image import MaskedImage, Image
-from alabortijcv2015.atm.builder import (compute_features, scale_images,
-                                         sparse_landmark_indices_from_dense,
-                                         zero_flow_grid_pcloud)
-from alabortijcv2015.aam.builder import normalize_images
+from menpo.image import MaskedImage
+from menpo.shape import PointCloud, TriMesh
 from menpo.feature.base import winitfeature
 from cyvlfeat.sift.dsift import dsift as cyvlfeat_dsift
 import numpy as np
+from scipy.spatial import KDTree
+
+
+def pointclouds_from_uv(u, v, add_zero=False):
+    if add_zero:
+        zero = zero_flow_grid_pcloud(u.shape).points
+
+    pclouds = []
+    for u1, v1 in zip(u.as_vector(keep_channels=True),
+                      v.as_vector(keep_channels=True)):
+        if add_zero:
+            u1 = u1 + zero[:, 1]
+            v1 = v1 + zero[:, 0]
+        pclouds.append(PointCloud(np.vstack([v1, u1]).T))
+    return pclouds
+
+
+def grid_triangulation(shape):
+    height, width = shape
+    row_to_index = lambda x: x * width
+    top_triangles = lambda x: np.concatenate([np.arange(row_to_index(x), row_to_index(x) + width - 1)[..., None],
+                                              np.arange(row_to_index(x) + 1, row_to_index(x) + width)[..., None],
+                                              np.arange(row_to_index(x + 1), row_to_index(x + 1) + width - 1)[..., None]], axis=1)
+
+    # Half edges are opposite directions
+    bottom_triangles = lambda x: np.concatenate([np.arange(row_to_index(x + 1), row_to_index(x + 1) + width - 1)[..., None],
+                                                 np.arange(row_to_index(x) + 1, row_to_index(x) + width)[..., None],
+                                                 np.arange(row_to_index(x + 1) + 1, row_to_index(x + 1) + width)[..., None]], axis=1)
+
+    trilist = []
+    for k in xrange(height - 1):
+        trilist.append(top_triangles(k))
+        trilist.append(bottom_triangles(k))
+
+    return np.concatenate(trilist)
+
+
+def zero_flow_grid_pcloud(shape, triangulated=False, mask=None):
+    point_grid = np.meshgrid(range(0, shape[0]),
+                             range(0, shape[1]), indexing='ij')
+    point_grid_vec = np.vstack([p.ravel() for p in point_grid]).T
+
+    if triangulated:
+        trilist = grid_triangulation(shape)
+        pcloud = TriMesh(point_grid_vec, trilist=trilist)
+    else:
+        pcloud = PointCloud(point_grid_vec)
+
+    if mask is not None:
+        return pcloud.from_mask(mask.pixels.ravel())
+    else:
+        return pcloud
+
+
+def sparse_landmark_indices_from_dense(dense_landmarks, sparse_lmarks):
+    points = dense_landmarks.points
+
+    tree = KDTree(points)
+
+    indices = np.array([tree.query(p)[1] for p in sparse_lmarks.points])
+    sparse_landmark_mask = np.zeros_like(indices, dtype=np.bool)
+    uniq_indices_set = set()
+    uniq_indices_list = []
+    for k, i in enumerate(indices):
+        if i not in uniq_indices_set:
+            uniq_indices_set.add(i)
+            uniq_indices_list.append(i)
+            sparse_landmark_mask[k] = True
+
+    return np.array(uniq_indices_list), sparse_landmark_mask
+
+
+def align_shape_with_bb(shape, bounding_box):
+    r"""
+    Returns the Similarity transform that aligns the provided shape with the
+    provided bounding box.
+    Parameters
+    ----------
+    shape: :class:`menpo.shape.PointCloud`
+        The shape to be aligned.
+    bounding_box: (2, 2) ndarray
+        The bounding box specified as:
+            np.array([[x_min, y_min], [x_max, y_max]])
+    Returns
+    -------
+    transform : :class: `menpo.transform.Similarity`
+        The align transform
+    """
+    shape_box = PointCloud(shape.bounds())
+    bounding_box = PointCloud(bounding_box)
+    return AlignmentSimilarity(shape_box, bounding_box, rotation=False)
+
+
+def noisy_align(source, target, noise_std=0.04, rotation=False):
+    r"""
+    Constructs and perturbs the optimal similarity transform between source
+    to the target by adding white noise to its weights.
+    Parameters
+    ----------
+    source: :class:`menpo.shape.PointCloud`
+        The source pointcloud instance used in the alignment
+    target: :class:`menpo.shape.PointCloud`
+        The target pointcloud instance used in the alignment
+    noise_std: float
+        The standard deviation of the white noise
+        Default: 0.04
+    rotation: boolean
+        If False the second parameter of the Similarity,
+        which captures captures inplane rotations, is set to 0.
+        Default:False
+    Returns
+    -------
+    noisy_transform : :class: `menpo.transform.Similarity`
+        The noisy Similarity Transform
+    """
+    transform = AlignmentSimilarity(source, target, rotation=rotation)
+    parameters = transform.as_vector()
+    parameter_range = np.hstack((parameters[:2], target.range()))
+    noise = (parameter_range * noise_std *
+             np.random.randn(transform.n_parameters))
+    return Similarity.init_identity(source.n_dims).from_vector(parameters + noise)
 
 
 @winitfeature
@@ -31,6 +147,8 @@ def dsift(pixels, step=1, size=6, bounds=None, norm=False,
 
 def build_atm(template_im, shape_models, reference_frames, scales, feature=no_op,
               sparse_group=None, scale_features=True, verbose=True):
+    from alabortijcv2015.atm import LinearGlobalATM
+    from alabortijcv2015.aam.builder import normalize_images, scale_images, compute_features
 
     # Normalise with the LARGEST scale
     normalized_template = template_im.rescale_to_reference_shape(
@@ -92,7 +210,10 @@ def build_atm(template_im, shape_models, reference_frames, scales, feature=no_op
 def build_sparse_aam(images, shape_models, reference_frames, scales, feature=no_op,
                      sparse_group=None, scale_features=True, max_appearance_components=None,
                      verbose=True):
-
+    from menpo.model import PCAModel
+    from alabortijcv2015.aam.builder import normalize_images, scale_images, compute_features
+    from menpofit.transform import DifferentiablePiecewiseAffine
+    from alabortijcv2015.aam import GlobalAAM
 
     normalized_images = normalize_images(images, sparse_group, None,
                                          reference_frames[-1].landmarks[sparse_group].lms,
@@ -169,6 +290,9 @@ def build_sparse_aam(images, shape_models, reference_frames, scales, feature=no_
 def build_aam(images, shape_models, reference_frames, scales, feature=no_op,
               sparse_group=None, scale_features=True, max_appearance_components=None,
               verbose=True):
+    from alabortijcv2015.aam import LinearGlobalAAM
+    from alabortijcv2015.aam.builder import normalize_images, scale_images, compute_features
+    from menpo.model import PCAModel
 
     normalized_images = normalize_images(images, sparse_group, None,
                                          reference_frames[-1].landmarks[sparse_group].lms,

@@ -5,8 +5,8 @@ import numpy as np
 
 from menpo.transform import Scale, AlignmentAffine
 
-from menpofit.base import noisy_align
-from menpofit.fitter import align_shape_with_bb
+from .snape_iccv_2015 import noisy_align
+from .snape_iccv_2015 import align_shape_with_bb
 
 from .utils import fsmooth
 

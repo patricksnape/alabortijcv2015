@@ -7,7 +7,7 @@ import numpy as np
 from menpo.shape import TriMesh
 from menpo.transform import Translation
 from menpo.image import MaskedImage
-from alabortijcv2015.atm.builder import zero_flow_grid_pcloud
+from alabortijcv2015.snape_iccv_2015 import zero_flow_grid_pcloud
 from alabortijcv2015.builder import build_reference_frame, \
     build_patch_reference_frame
 from menpo.transform.piecewiseaffine.base import CythonPWA
