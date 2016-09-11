@@ -129,7 +129,8 @@ def noisy_align(source, target, noise_std=0.04, rotation=False):
 
 
 def build_atm(template_im, shape_models, reference_frames, scales, feature=no_op,
-              sparse_group=None, scale_features=True, verbose=True):
+              sparse_group=None, scale_features=True, verbose=True,
+              transform_cls=PiecewiseAffine):
     from alabortijcv2015.atm import LinearGlobalATM
     from alabortijcv2015.aam.builder import scale_images, compute_features
 
@@ -161,8 +162,8 @@ def build_atm(template_im, shape_models, reference_frames, scales, feature=no_op
                                               verbose=verbose,
                                               features=feature)[0]
 
-        transform = PiecewiseAffine(ref_frame.landmarks[sparse_group].lms,
-                                    level_template.landmarks[sparse_group].lms)
+        transform = transform_cls(ref_frame.landmarks[sparse_group].lms,
+                                  level_template.landmarks[sparse_group].lms)
 
         # warp template to reference frame
         if isinstance(level_template, MaskedImage):
